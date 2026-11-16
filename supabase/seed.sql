@@ -1,0 +1,6 @@
+-- Create the first administrator in Supabase Auth, then replace the values below
+-- with that user's auth.users UUID, full name, email, and phone before running.
+-- Do not put a real password or service-role key in this file.
+--
+-- insert into public.profiles (id, role, full_name, email, phone)
+-- values ('00000000-0000-0000-0000-000000000000', 'admin', 'اسم المسؤول', 'admin@example.com', '01000000000');
