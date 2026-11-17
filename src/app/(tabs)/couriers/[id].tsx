@@ -22,6 +22,7 @@ export default function CourierDetailsScreen() {
     isDemo,
     getCourierPrivateDetails,
     approveCourierShiftClose,
+    setCourierActive,
     renewCourierContract,
     terminateCourier,
     updateCourierProfile,
@@ -38,6 +39,9 @@ export default function CourierDetailsScreen() {
   const [address, setAddress] = useState('');
   const [idCard, setIdCard] = useState<ImagePickerAsset | null>(null);
   const [selfie, setSelfie] = useState<ImagePickerAsset | null>(null);
+  const [idCardLoadFailed, setIdCardLoadFailed] = useState(false);
+  const [selfieLoadFailed, setSelfieLoadFailed] = useState(false);
+  const [imageRetrying, setImageRetrying] = useState(false);
 
   const loadDetails = useCallback(async () => {
     if (isDemo || !Number.isSafeInteger(courierId) || courierId < 1) return;
@@ -46,6 +50,8 @@ export default function CourierDetailsScreen() {
     try {
       const result = await getCourierPrivateDetails(courierId);
       setDetails(result);
+      setIdCardLoadFailed(false);
+      setSelfieLoadFailed(false);
       setFullName(result.fullName);
       setEmail(result.email);
       setPhone(result.phone);
@@ -123,6 +129,31 @@ export default function CourierDetailsScreen() {
     } finally {
       setBusyAction('');
     }
+  };
+
+  const refreshImageLinks = async () => {
+    setImageRetrying(true);
+    try {
+      await loadDetails();
+    } finally {
+      setImageRetrying(false);
+    }
+  };
+
+  const toggleTemporaryAccount = () => {
+    if (!details) return;
+    const nextActive = !details.isActive;
+    confirmAndRun(
+      nextActive ? 'إعادة تفعيل حساب المندوب' : 'إيقاف حساب المندوب مؤقتًا',
+      nextActive
+        ? 'سيتمكن المندوب من تسجيل الدخول مجددًا، ويستطيع بدء الشيفت بنفسه.'
+        : 'سيُمنع المندوب من تسجيل الدخول ويتوقف الشيفت. انقل أو أكمل طلباته غير المنتهية أولًا.',
+      nextActive ? 'إعادة التفعيل' : 'إيقاف مؤقت',
+      async () => {
+        await setCourierActive(courierId, nextActive);
+        await loadDetails();
+      },
+    );
   };
 
   const confirmAndRun = (
@@ -268,17 +299,46 @@ export default function CourierDetailsScreen() {
             />
             <Field label="العنوان" multiline onChangeText={setAddress} value={address} />
             <Body>صورة البطاقة الحالية</Body>
-            <Image accessibilityLabel="صورة بطاقة المندوب" resizeMode="contain" source={{ uri: details.idCardUrl }} style={styles.cardImage} />
+            {idCardLoadFailed ? (
+              <Notice tone="warning">تعذر تحميل صورة البطاقة من التخزين. أعد تحميل رابط الصورة.</Notice>
+            ) : (
+              <Image
+                accessibilityLabel="صورة بطاقة المندوب"
+                onError={() => setIdCardLoadFailed(true)}
+                resizeMode="contain"
+                source={{ uri: details.idCardUrl }}
+                style={styles.cardImage}
+              />
+            )}
             <ActionButton onPress={() => void pickImage(setIdCard, 'صورة البطاقة')} tone="outline">
               {idCard ? 'تغيير صورة البطاقة المختارة' : 'رفع صورة بطاقة جديدة'}
             </ActionButton>
             {idCard?.uri ? <Image source={{ uri: idCard.uri }} style={styles.cardImage} /> : null}
             <Body>صورة السيلفي الحالية</Body>
             {details.selfieUrl ? (
-              <Image accessibilityLabel="صورة سيلفي للمندوب" source={{ uri: details.selfieUrl }} style={styles.selfieImage} />
+              selfieLoadFailed ? (
+                <Notice tone="warning">تعذر تحميل صورة المندوب من التخزين. أعد تحميل رابط الصورة.</Notice>
+              ) : (
+                <Image
+                  accessibilityLabel="صورة سيلفي للمندوب"
+                  onError={() => setSelfieLoadFailed(true)}
+                  source={{ uri: details.selfieUrl }}
+                  style={styles.selfieImage}
+                />
+              )
             ) : (
               <Body>لا توجد صورة سيلفي مرفوعة.</Body>
             )}
+            {idCardLoadFailed || selfieLoadFailed ? (
+              <ActionButton
+                disabled={imageRetrying}
+                loading={imageRetrying}
+                onPress={() => void refreshImageLinks()}
+                tone="outline"
+              >
+                إعادة تحميل الصور
+              </ActionButton>
+            ) : null}
             <ActionButton onPress={() => void pickImage(setSelfie, 'صورة السيلفي')} tone="outline">
               {selfie ? 'تغيير صورة السيلفي المختارة' : 'رفع صورة سيلفي جديدة'}
             </ActionButton>
@@ -292,6 +352,14 @@ export default function CourierDetailsScreen() {
 
           {!isTerminated ? (
             <Section title="إجراءات إدارية">
+              <ActionButton
+                disabled={busyAction !== ''}
+                loading={busyAction === (details.isActive ? 'إيقاف مؤقت' : 'إعادة التفعيل')}
+                onPress={toggleTemporaryAccount}
+                tone={details.isActive ? 'danger' : 'secondary'}
+              >
+                {details.isActive ? 'إيقاف الحساب مؤقتًا' : 'إعادة تفعيل الحساب'}
+              </ActionButton>
               <ActionButton
                 disabled={busyAction !== ''}
                 loading={busyAction === 'تجديد العقد'}

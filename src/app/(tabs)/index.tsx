@@ -437,13 +437,11 @@ function CourierHome() {
               ? 'أنت على الشيفت'
               : 'الشيفت متوقف'}
         </Subheading>
-        <Body>
-          {isDemo
-            ? 'تشغيل الشيفت في المعاينة لا يشارك موقعًا حقيقيًا.'
-            : Platform.OS === 'web'
-              ? 'يُشارك موقعك أثناء فتح صفحة الويب فقط. اسمح بإذن الموقع؛ يحتاج الموقع المنشور إلى HTTPS.'
-              : 'يُشارك موقعك أثناء الشيفت، ويتوقف بعد موافقة الإدارة على طلب الإغلاق.'}
-        </Body>
+        {isDemo ? (
+          <Body>تشغيل الشيفت في المعاينة لا يشارك موقعًا حقيقيًا.</Body>
+        ) : Platform.OS !== 'web' ? (
+          <Body>يُشارك موقعك أثناء الشيفت، ويتوقف بعد موافقة الإدارة على طلب الإغلاق.</Body>
+        ) : null}
         {profile?.shiftStartedAt ? (
           <Body>بدأ الشيفت: {new Date(profile.shiftStartedAt).toLocaleString('ar-EG')}</Body>
         ) : active ? (
