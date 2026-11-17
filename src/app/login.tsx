@@ -1,45 +1,41 @@
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Subheading } from '../components/ui';
 import { isBackendConfigured } from '../lib/supabase';
 import { useApp } from '../state/app-context';
-import type { UserRole } from '../types';
-import { colors, spacing } from '../theme';
-
-const demoRoles: { role: UserRole; label: string }[] = [
-  { role: 'admin', label: 'الإدارة' },
-  { role: 'restaurant', label: 'مطعم تجريبي' },
-  { role: 'courier', label: 'مندوب تجريبي' },
-  { role: 'support', label: 'موظف دعم تجريبي' },
-];
+import { colors } from '../theme';
 
 export default function LoginScreen() {
-  const { signIn, signInDemo } = useApp();
+  const { signIn } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const submit = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('بيانات ناقصة', 'اكتب البريد الإلكتروني وكلمة المرور.');
+      setErrorMessage('اكتب البريد الإلكتروني وكلمة المرور.');
       return;
     }
+    setErrorMessage('');
     setBusy(true);
     try {
       const role = await signIn(email.trim(), password);
       router.replace(role === 'support' ? '/(tabs)/support' : '/(tabs)');
     } catch (error) {
-      Alert.alert('تعذر تسجيل الدخول', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      const message = error instanceof Error ? error.message : 'حاول مرة أخرى.';
+      setErrorMessage(
+        /invalid login credentials/i.test(message)
+          ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة.'
+          : /email not confirmed/i.test(message)
+            ? 'البريد الإلكتروني غير مفعّل. تواصل مع الإدارة.'
+            : message,
+      );
     } finally {
       setBusy(false);
     }
-  };
-
-  const openDemo = (role: UserRole) => {
-    signInDemo(role);
-    router.replace(role === 'support' ? '/(tabs)/support' : '/(tabs)');
   };
 
   return (
@@ -77,19 +73,10 @@ export default function LoginScreen() {
           secureTextEntry
           value={password}
         />
+        {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
         <ActionButton loading={busy} onPress={submit}>
           دخول
         </ActionButton>
-
-        <View style={styles.demoSection}>
-          <Subheading>معاينة الواجهات</Subheading>
-          <Body>حسابات افتراضية ببيانات غير حقيقية، لا تحتاج اتصالًا بالخادم.</Body>
-          {demoRoles.map((item) => (
-            <ActionButton key={item.role} onPress={() => openDemo(item.role)} tone="outline">
-              الدخول كـ {item.label}
-            </ActionButton>
-          ))}
-        </View>
       </Page>
     </KeyboardAvoidingView>
   );
@@ -106,5 +93,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   markText: { color: colors.white, fontSize: 32, fontWeight: '800' },
-  demoSection: { gap: spacing.sm, marginTop: spacing.md },
 });
