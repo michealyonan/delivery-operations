@@ -94,6 +94,7 @@ interface AppContextValue {
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
   createOrder: (input: NewOrderInput) => Promise<void>;
+  acceptAdminOrder: (orderId: string) => Promise<number | null>;
   saveRestaurantMenuItem: (
     itemId: number | null,
     name: string,
@@ -273,6 +274,8 @@ function mapOrder(row: Record<string, unknown>): DeliveryOrder {
         : asNumber(row.paid_to_restaurant_piasters),
     status: row.status as OrderStatus,
     createdAt: String(row.created_at),
+    restaurantAcceptedAt:
+      row.restaurant_accepted_at == null ? undefined : String(row.restaurant_accepted_at),
     assignedAt: row.assigned_at == null ? undefined : String(row.assigned_at),
     lastUnacceptedCourierId:
       row.last_unaccepted_courier_id == null
@@ -1165,6 +1168,12 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (profile.role === 'admin' && !restaurants.some((item) => item.id === restaurantId)) {
         throw new Error('المطعم المحدد غير موجود؛ حدّث قائمة المطاعم وحاول مرة أخرى.');
       }
+      if (
+        profile.role === 'admin' &&
+        (!Number.isSafeInteger(input.deliveryFeePiasters) || (input.deliveryFeePiasters ?? -1) < 0)
+      ) {
+        throw new Error('حدد رسوم التوصيل قبل إرسال الطلب للمطعم.');
+      }
       if (isDemo) {
         const restaurant =
           restaurants.find((item) => item.id === restaurantId) ??
@@ -1213,8 +1222,9 @@ export function AppProvider({ children }: PropsWithChildren) {
             lineItems: selectedItems,
             notes: input.notes,
             restaurantDuePiasters,
-            amountDuePiasters: restaurantDuePiasters,
-            deliveryFeePiasters: undefined,
+            amountDuePiasters: restaurantDuePiasters + (input.deliveryFeePiasters ?? 0),
+            deliveryFeePiasters:
+              profile.role === 'admin' ? input.deliveryFeePiasters : undefined,
             status: 'pending',
             createdAt: new Date().toISOString(),
           };
@@ -1230,6 +1240,7 @@ export function AppProvider({ children }: PropsWithChildren) {
               p_customer_phone: input.customerPhone,
               p_customer_address: input.customerAddress,
               p_notes: input.notes,
+              p_delivery_fee_piasters: input.deliveryFeePiasters,
               p_items: input.items,
             })
           : await client.rpc('submit_restaurant_order', {
@@ -1246,6 +1257,118 @@ export function AppProvider({ children }: PropsWithChildren) {
       setOrders((current) => [mapOrder(order), ...current]);
     },
     [isDemo, profile, restaurantMenuItems, restaurants],
+  );
+
+  const acceptAdminOrder = useCallback(
+    async (orderId: string) => {
+      if (!profile || profile.role !== 'restaurant') {
+        throw new Error('قبول طلبات الإدارة متاح للمطعم المحدد فقط.');
+      }
+      const order = orders.find((item) => item.id === orderId);
+      if (
+        !order ||
+        order.restaurantId !== profile.restaurantId ||
+        order.orderSource !== 'admin' ||
+        order.status !== 'pending' ||
+        order.restaurantAcceptedAt
+      ) {
+        throw new Error('الطلب غير متاح للقبول أو سبق التعامل معه.');
+      }
+
+      if (isDemo) {
+        const acceptedAt = new Date().toISOString();
+        const availableCouriers = couriers
+          .filter(
+            (courier) =>
+              courier.isActive &&
+              !courier.isTerminated &&
+              courier.isOnShift &&
+              !courier.shiftCloseRequestedAt &&
+              !courier.isOnBreak &&
+              courier.contractEndDate >= acceptedAt.slice(0, 10) &&
+              !orders.some(
+                (item) =>
+                  item.courierId === courier.id &&
+                  ['assigned', 'accepted', 'picked_up'].includes(item.status),
+              ),
+          )
+          .map((courier) => ({
+            courier,
+            location:
+              locations.find((location) => location.courierId === courier.id) ??
+              courier.location,
+          }))
+          .filter(
+            (candidate): candidate is typeof candidate & { location: CourierLocation } =>
+              Boolean(candidate.location),
+          )
+          .sort((first, second) => {
+            if (
+              order.restaurantLatitude == null ||
+              order.restaurantLongitude == null
+            ) {
+              return first.courier.id - second.courier.id;
+            }
+            return (
+              distanceInMeters(
+                order.restaurantLatitude,
+                order.restaurantLongitude,
+                first.location.latitude,
+                first.location.longitude,
+              ) -
+              distanceInMeters(
+                order.restaurantLatitude,
+                order.restaurantLongitude,
+                second.location.latitude,
+                second.location.longitude,
+              )
+            );
+          });
+        const courier = availableCouriers[0]?.courier;
+        setOrders((current) =>
+          current.map((item) =>
+            item.id === orderId
+              ? {
+                  ...item,
+                  restaurantAcceptedAt: acceptedAt,
+                  ...(courier
+                    ? {
+                        courierId: courier.id,
+                        status: 'assigned' as const,
+                        assignedAt: acceptedAt,
+                      }
+                    : {}),
+                }
+              : item,
+          ),
+        );
+        if (courier) {
+          setOrderAssignmentAttempts((current) => [
+            {
+              id: `demo-${orderId}-${acceptedAt}`,
+              orderId,
+              orderCode: order.code,
+              courierId: courier.id,
+              assignedAt: acceptedAt,
+              status: 'awaiting',
+            },
+            ...current,
+          ]);
+        }
+        return courier?.id ?? null;
+      }
+
+      const { data, error } = await assertBackend().rpc('restaurant_accept_admin_order', {
+        p_order_id: orderId,
+      });
+      if (error) throw error;
+      if (data != null && (!Number.isSafeInteger(Number(data)) || Number(data) < 1)) {
+        throw new Error('الخادم أتم قبول الطلب لكنه أعاد رقم مندوب غير صالح.');
+      }
+      await refresh();
+      return data == null ? null : Number(data);
+    },
+    [couriers, isDemo, locations, orders, profile, refresh],
   );
 
   const createCourier = useCallback(
@@ -3048,6 +3171,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       signOut,
       refresh,
       createOrder,
+      acceptAdminOrder,
       loadRestaurantMenu,
       saveRestaurantMenuItem,
       createCourier,
@@ -3110,6 +3234,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       signOut,
       refresh,
       createOrder,
+      acceptAdminOrder,
       loadRestaurantMenu,
       saveRestaurantMenuItem,
       createCourier,

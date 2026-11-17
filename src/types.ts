@@ -125,6 +125,7 @@ export interface DeliveryOrder {
   previousCourierId?: number;
   status: OrderStatus;
   createdAt: string;
+  restaurantAcceptedAt?: string;
   assignedAt?: string;
   lastUnacceptedCourierId?: number;
   assignmentExpiredAt?: string;
@@ -193,6 +194,7 @@ export interface RestaurantMenuItem {
 
 export interface NewOrderInput {
   restaurantId?: number;
+  deliveryFeePiasters?: number;
   customerName: string;
   customerPhone: string;
   customerAddress: string;

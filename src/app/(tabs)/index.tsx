@@ -205,9 +205,9 @@ function AdminHome() {
         <Metric value={String(deliveredToday)} label="تم توصيلها اليوم" />
       </View>
       <Section title="طلب جديد من الإدارة">
-        <Body>أنشئ الطلب باسم الإدارة، وبعد حفظه أضف رسوم التوصيل وأسنده لمندوب من قائمة الطلبات.</Body>
+        <Body>اختر المطعم، وسجّل بيانات العميل والرسوم. يراجع المطعم الطلب ويقبله قبل إرساله تلقائيًا للمندوب.</Body>
         <ActionButton onPress={() => router.push('/restaurant-new-order')}>
-          إنشاء طلب باسم الإدارة
+          إنشاء طلب وإرساله للمطعم
         </ActionButton>
       </Section>
 

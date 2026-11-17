@@ -339,6 +339,9 @@ export default function OrderDetailScreen() {
       {(profile?.role !== 'courier' || canCourierViewOrderTimes) && (
         <Section title="مواعيد الطلب">
           <Body>إرسال المطعم للطلب: {formatOrderTime(order.createdAt)}</Body>
+          {order.restaurantAcceptedAt ? (
+            <Body>قبول المطعم للطلب: {formatOrderTime(order.restaurantAcceptedAt)}</Body>
+          ) : null}
           <Body>إرسال الإدارة للمندوب: {formatOrderTime(order.assignedAt)}</Body>
           <Body>قبول المندوب للطلب: {formatOrderTime(order.acceptedAt)}</Body>
           <Body>تسليم الطلب للعميل: {formatOrderTime(order.deliveredAt)}</Body>

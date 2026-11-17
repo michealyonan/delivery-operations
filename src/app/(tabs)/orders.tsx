@@ -3,22 +3,53 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, StatusTag } from '../../components/ui';
+import {
+  ActionButton,
+  Body,
+  Field,
+  Heading,
+  Notice,
+  Page,
+  SegmentedSwitch,
+  StatusTag,
+} from '../../components/ui';
 import { Alert } from '../../lib/platform-alert';
 import { parsePiasters, useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { DeliveryOrder } from '../../types';
 
 function OrderItem({ order }: { order: DeliveryOrder }) {
-  const { profile, couriers, locations, orders, isDemo, assignOrder, assignOrderToNearestCourier } = useApp();
+  const {
+    profile,
+    couriers,
+    locations,
+    orders,
+    isDemo,
+    acceptAdminOrder,
+    assignOrder,
+    assignOrderToNearestCourier,
+  } = useApp();
   const [busy, setBusy] = useState(false);
   const [deliveryFeeInput, setDeliveryFeeInput] = useState(
-    order.orderSource === 'admin' && order.status === 'pending'
-      ? ''
-      : order.deliveryFeePiasters == null
-        ? ''
-        : (order.deliveryFeePiasters / 100).toFixed(2),
+    order.deliveryFeePiasters == null ? '' : (order.deliveryFeePiasters / 100).toFixed(2),
   );
+  const acceptAdminOrderFromRestaurant = async () => {
+    setBusy(true);
+    try {
+      const courierId = await acceptAdminOrder(order.id);
+      const courier = couriers.find((item) => item.id === courierId);
+      Alert.alert(
+        'تم قبول الطلب',
+        courier
+          ? `تم قبول الطلب وإرساله تلقائيًا إلى ${courier.fullName}.`
+          : 'تم قبول الطلب، لكن لا يوجد مندوب متاح بموقع حديث الآن. سيظل الطلب ظاهرًا للإدارة لإسناده.',
+      );
+    } catch (error) {
+      Alert.alert('تعذر قبول الطلب', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const assign = async (courierId: number) => {
     let deliveryFeePiasters: number | undefined;
@@ -94,7 +125,36 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
         <StatusTag status={order.status} />
       </View>
       {profile?.role === 'restaurant' && order.orderSource === 'admin' ? (
-        <Notice tone="info">أنشأت الإدارة هذا الطلب نيابةً عن المطعم.</Notice>
+        <>
+          <Notice tone="info">طلبته الإدارة من مطعمك؛ راجع التفاصيل ثم اقبله لإرساله للمندوب.</Notice>
+          {order.status === 'pending' && !order.restaurantAcceptedAt ? (
+            <ActionButton
+              disabled={busy}
+              loading={busy}
+              onPress={() => void acceptAdminOrderFromRestaurant()}
+            >
+              قبول الطلب وإرساله للمندوب
+            </ActionButton>
+          ) : order.status === 'pending' && order.restaurantAcceptedAt ? (
+            <Notice tone="warning">
+              قبل المطعم الطلب؛ لا يوجد مندوب متاح بموقع حديث حتى الآن. تتابع الإدارة إسناده.
+            </Notice>
+          ) : order.status === 'assigned' || order.status === 'accepted' || order.status === 'picked_up' ? (
+            <Notice tone="info">قبل المطعم الطلب وأُرسل للمندوب.</Notice>
+          ) : null}
+        </>
+      ) : null}
+      {profile?.role === 'admin' &&
+      order.orderSource === 'admin' &&
+      order.status === 'pending' &&
+      !order.restaurantAcceptedAt ? (
+        <Notice tone="warning">ينتظر الطلب قبول المطعم؛ سيُرسل تلقائيًا لأقرب مندوب متاح بعد القبول.</Notice>
+      ) : null}
+      {profile?.role === 'admin' &&
+      order.orderSource === 'admin' &&
+      order.status === 'pending' &&
+      order.restaurantAcceptedAt ? (
+        <Notice tone="warning">قبل المطعم الطلب، ولا يوجد مندوب متاح بموقع حديث حتى الآن؛ يمكنك إسناده يدويًا.</Notice>
       ) : null}
       <Text style={styles.money}>
         {order.deliveryFeePiasters == null
@@ -113,7 +173,9 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
           {`المندوب ${couriers.find((courier) => courier.id === order.lastUnacceptedCourierId)?.fullName ?? 'المسند إليه'} لم يقبل الطلب خلال 120 ثانية؛ عاد الطلب إلى الإدارة.`}
         </Notice>
       ) : null}
-      {profile?.role === 'admin' && order.status === 'pending' && (
+      {profile?.role === 'admin' &&
+        order.status === 'pending' &&
+        (order.orderSource !== 'admin' || Boolean(order.restaurantAcceptedAt)) && (
         <View style={styles.assignArea}>
           <Field
             keyboardType="decimal-pad"
@@ -180,6 +242,19 @@ export default function OrdersScreen() {
   const { showHistory: showHistoryParam } = useLocalSearchParams<{ showHistory?: string }>();
   const showCourierHistory = showHistoryParam === 'true';
   const [selectedRestaurantId, setSelectedRestaurantId] = useState<number | null>(null);
+  const [selectedRestaurantTab, setSelectedRestaurantTab] = useState('admin');
+  const adminRequestedCount = orders.filter(
+    (order) =>
+      order.restaurantId === profile?.restaurantId &&
+      order.orderSource === 'admin' &&
+      order.status !== 'cancelled',
+  ).length;
+  const restaurantOrderCount = orders.filter(
+    (order) =>
+      order.restaurantId === profile?.restaurantId &&
+      order.orderSource === 'restaurant' &&
+      order.status !== 'cancelled',
+  ).length;
   const restaurantOptions = restaurants
     .filter((restaurant) => orders.some((order) => order.restaurantId === restaurant.id))
     .sort((first, second) => first.name.localeCompare(second.name, 'ar-EG'));
@@ -191,7 +266,12 @@ export default function OrdersScreen() {
     ) {
       return false;
     }
-    if (profile?.role === 'restaurant') return order.restaurantId === profile.restaurantId;
+    if (profile?.role === 'restaurant') {
+      return (
+        order.restaurantId === profile.restaurantId &&
+        order.orderSource === (selectedRestaurantTab === 'admin' ? 'admin' : 'restaurant')
+      );
+    }
     if (profile?.role === 'courier') {
       return (
         order.courierId === profile.courierId &&
@@ -223,6 +303,16 @@ export default function OrdersScreen() {
             ? 'طلبات المطعم'
             : 'كل الطلبات'}
       </Heading>
+      {profile?.role === 'restaurant' ? (
+        <SegmentedSwitch
+          items={[
+            { key: 'admin', label: `طلبات الإدارة (${adminRequestedCount})` },
+            { key: 'restaurant', label: `طلبات المطعم (${restaurantOrderCount})` },
+          ]}
+          selected={selectedRestaurantTab}
+          onSelect={setSelectedRestaurantTab}
+        />
+      ) : null}
       {profile?.role === 'courier' ? (
         <ActionButton
           onPress={() => router.setParams({ showHistory: showCourierHistory ? 'false' : 'true' })}
@@ -261,7 +351,7 @@ export default function OrdersScreen() {
         </>
       ) : null}
       {isDemo && <Notice tone="warning">بيانات تجريبية داخل هذا الجهاز فقط.</Notice>}
-      {profile?.role === 'restaurant' && (
+      {profile?.role === 'restaurant' && selectedRestaurantTab === 'restaurant' && (
         <>
           {profile.restaurantAcceptsOrders === false ? (
             <Notice tone="warning">أوقفت الإدارة استقبال الطلبات الجديدة لهذا المطعم.</Notice>

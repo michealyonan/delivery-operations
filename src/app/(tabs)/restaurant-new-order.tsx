@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../components/ui';
-import { useApp } from '../../state/app-context';
+import { parsePiasters, useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 
 const money = (piasters: number) =>
@@ -33,6 +33,8 @@ export default function NewOrderScreen() {
   const [loadedMenuRestaurantId, setLoadedMenuRestaurantId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [restaurantPickerOpen, setRestaurantPickerOpen] = useState(false);
+  const [deliveryFeeInput, setDeliveryFeeInput] = useState('');
   const acceptsOrders = profile?.restaurantAcceptsOrders !== false;
   const menuRestaurantId = isAdmin ? selectedRestaurantId : profile?.restaurantId ?? null;
   const menuBusy = menuRestaurantId != null && loadedMenuRestaurantId !== menuRestaurantId;
@@ -66,6 +68,14 @@ export default function NewOrderScreen() {
     const item = restaurantMenuItems.find((candidate) => candidate.id === selected.itemId);
     return total + (item?.isAvailable ? item.pricePiasters * selected.quantity : 0);
   }, 0);
+  const deliveryFeePreview = useMemo(() => {
+    if (!isAdmin || !deliveryFeeInput.trim()) return null;
+    try {
+      return parsePiasters(deliveryFeeInput);
+    } catch {
+      return null;
+    }
+  }, [deliveryFeeInput, isAdmin]);
   const changeQuantity = (itemId: number, change: number) => {
     setQuantities((current) => {
       const next = Math.max(0, Math.min(99, (current[itemId] ?? 0) + change));
@@ -94,10 +104,20 @@ export default function NewOrderScreen() {
       setErrorMessage('اختر صنفًا واحدًا على الأقل من القائمة المتاحة.');
       return;
     }
+    let deliveryFeePiasters: number | undefined;
+    if (isAdmin) {
+      try {
+        deliveryFeePiasters = parsePiasters(deliveryFeeInput);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : 'حدد رسوم التوصيل للطلب.');
+        return;
+      }
+    }
     setBusy(true);
     try {
       await createOrder({
         restaurantId: isAdmin ? selectedRestaurantId ?? undefined : undefined,
+        deliveryFeePiasters,
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim(),
         customerAddress: customerAddress.trim(),
@@ -106,7 +126,7 @@ export default function NewOrderScreen() {
       });
       setSuccessMessage(
         isAdmin
-          ? 'تم إنشاء الطلب باسم الإدارة. افتح قائمة الطلبات، أضف رسوم التوصيل، ثم أرسله للمندوب.'
+          ? 'تم إرسال الطلب للمطعم لمراجعته. بعد قبول المطعم، سيحاول النظام إسناده تلقائيًا لأقرب مندوب متاح.'
           : 'تم إرسال الطلب للإدارة؛ ستحدد الإدارة رسوم التوصيل عند إسناده للمندوب.',
       );
     } catch (error) {
@@ -128,37 +148,69 @@ export default function NewOrderScreen() {
           {restaurants.length === 0 ? (
             <Notice tone="warning">لا توجد مطاعم مسجلة لإنشاء طلب لها.</Notice>
           ) : (
-            <View style={styles.restaurantOptions}>
-              {restaurants.map((restaurant) => {
-                const selected = restaurant.id === selectedRestaurantId;
-                return (
-                  <Pressable
-                    key={restaurant.id}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    onPress={() => selectRestaurant(restaurant.id)}
-                    style={[styles.restaurantOption, selected && styles.restaurantOptionSelected]}
-                  >
-                    <Text
-                      style={[
-                        styles.restaurantOptionName,
-                        selected && styles.restaurantOptionNameSelected,
-                      ]}
-                    >
-                      {restaurant.name}
+            <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: restaurantPickerOpen }}
+                onPress={() => setRestaurantPickerOpen((open) => !open)}
+                style={styles.restaurantPicker}
+              >
+                <MaterialCommunityIcons
+                  name={restaurantPickerOpen ? 'chevron-up' : 'chevron-down'}
+                  size={22}
+                  color={colors.primary}
+                />
+                <View style={styles.restaurantPickerText}>
+                  <Text style={styles.restaurantOptionName}>
+                    {selectedRestaurant?.name ?? 'اختر المطعم'}
+                  </Text>
+                  {selectedRestaurant ? (
+                    <Text style={styles.restaurantOptionCode}>
+                      {selectedRestaurant.code} · {selectedRestaurant.address}
                     </Text>
-                    <Text
-                      style={[
-                        styles.restaurantOptionCode,
-                        selected && styles.restaurantOptionNameSelected,
-                      ]}
-                    >
-                      {restaurant.code}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+                  ) : null}
+                </View>
+              </Pressable>
+              {restaurantPickerOpen ? (
+                <View style={styles.restaurantOptions}>
+                  {restaurants.map((restaurant) => {
+                    const selected = restaurant.id === selectedRestaurantId;
+                    return (
+                      <Pressable
+                        key={restaurant.id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        onPress={() => {
+                          selectRestaurant(restaurant.id);
+                          setRestaurantPickerOpen(false);
+                        }}
+                        style={[
+                          styles.restaurantOption,
+                          selected && styles.restaurantOptionSelected,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.restaurantOptionName,
+                            selected && styles.restaurantOptionNameSelected,
+                          ]}
+                        >
+                          {restaurant.name}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.restaurantOptionCode,
+                            selected && styles.restaurantOptionNameSelected,
+                          ]}
+                        >
+                          {restaurant.code} · {restaurant.address}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </>
           )}
         </Section>
       ) : null}
@@ -167,7 +219,7 @@ export default function NewOrderScreen() {
       ) : null}
       <Body>
         {isAdmin
-          ? 'اختر أصناف المطعم والكميات، ثم أدخل بيانات العميل. سيظهر الطلب في قائمة الإدارة لتحديد رسوم التوصيل وإسناده للمندوب.'
+          ? 'اختر المطعم وأصنافه، واكتب بيانات العميل ورسوم التوصيل. سيصل الطلب للمطعم للموافقة قبل إرساله للمندوب.'
           : 'اختر الأصناف والكميات. ستضيف الإدارة رسوم التوصيل لهذا الطلب عند إرساله للمندوب.'}
       </Body>
       {!isAdmin ? (
@@ -242,10 +294,32 @@ export default function NewOrderScreen() {
         <Field label="ملاحظات للمندوب (اختياري)" multiline onChangeText={setNotes} value={notes} />
       </Section>
 
+      {isAdmin ? (
+        <Section title="رسوم التوصيل">
+          <Field
+            keyboardType="decimal-pad"
+            label="رسوم التوصيل · جنيه (مطلوبة قبل الإرسال للمطعم)"
+            onChangeText={setDeliveryFeeInput}
+            value={deliveryFeeInput}
+          />
+        </Section>
+      ) : null}
+
       <Section title="المبالغ المحسوبة">
         <Body>قيمة الأصناف المستحقة للمطعم: {money(restaurantTotalPiasters)}</Body>
-        <Body>رسوم التوصيل: تضيفها الإدارة عند إسناد الطلب للمندوب.</Body>
-        <Text style={styles.total}>إجمالي العميل النهائي يظهر بعد إسناد الطلب.</Text>
+        <Body>
+          رسوم التوصيل:{' '}
+          {isAdmin
+            ? !deliveryFeeInput.trim()
+              ? 'لم تُحدد بعد'
+              : deliveryFeePreview == null
+                ? 'راجع المبلغ'
+                : money(deliveryFeePreview)
+            : 'تضيفها الإدارة عند إسناد الطلب.'}
+        </Body>
+        <Text style={styles.total}>
+          إجمالي العميل: {money(restaurantTotalPiasters + (deliveryFeePreview ?? 0))}
+        </Text>
       </Section>
 
       {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
@@ -262,12 +336,15 @@ export default function NewOrderScreen() {
           menuBusy ||
           Boolean(successMessage) ||
           !acceptsOrders ||
-          (isAdmin && (selectedRestaurantId == null || !selectedRestaurant))
+          (isAdmin &&
+            (selectedRestaurantId == null ||
+              !selectedRestaurant ||
+              !deliveryFeeInput.trim()))
         }
         loading={busy}
         onPress={submit}
       >
-        {isAdmin ? 'إنشاء الطلب باسم الإدارة' : acceptsOrders ? 'إرسال للإدارة' : 'استقبال الطلبات متوقف'}
+        {isAdmin ? 'إرسال الطلب للمطعم' : acceptsOrders ? 'إرسال للإدارة' : 'استقبال الطلبات متوقف'}
       </ActionButton>
     </Page>
   );
@@ -301,6 +378,19 @@ const styles = StyleSheet.create({
   quantity: { minWidth: 22, color: colors.text, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   total: { color: colors.primaryDark, fontSize: 16, fontWeight: '800', textAlign: 'right' },
   restaurantOptions: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: spacing.sm },
+  restaurantPicker: {
+    minHeight: 58,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+  },
+  restaurantPickerText: { flex: 1, gap: 4 },
   restaurantOption: {
     minWidth: 130,
     flexGrow: 1,
