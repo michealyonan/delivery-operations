@@ -1,14 +1,59 @@
 import { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
+import { AdminAccountActions } from '../../components/admin-account-actions';
 import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../components/ui';
 import { isBackendConfigured } from '../../lib/supabase';
-import { useApp } from '../../state/app-context';
+import { parsePiasters, useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { TemporaryCredentials } from '../../types';
 
+function DeliveryFeeEditor({
+  restaurantId,
+  initialFee,
+  disabled,
+  onSave,
+}: {
+  restaurantId: number;
+  initialFee: number;
+  disabled: boolean;
+  onSave: (restaurantId: number, feePiasters: number) => Promise<void>;
+}) {
+  const [amount, setAmount] = useState((initialFee / 100).toFixed(2));
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const save = async () => {
+    setErrorMessage('');
+    setBusy(true);
+    try {
+      await onSave(restaurantId, parsePiasters(amount));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'تعذر حفظ رسوم التوصيل.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.feeEditor}>
+      <Field
+        keyboardType="decimal-pad"
+        label="رسوم التوصيل التي تحددها الإدارة · جنيه"
+        onChangeText={setAmount}
+        value={amount}
+      />
+      <Body>تُضاف الرسوم تلقائيًا إلى قيمة المطعم عند إرسال أي طلب جديد.</Body>
+      {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
+      <ActionButton disabled={disabled} loading={busy} onPress={() => void save()} tone="outline">
+        حفظ رسوم التوصيل
+      </ActionButton>
+    </View>
+  );
+}
+
 export default function RestaurantsScreen() {
-  const { restaurants, createRestaurant, isDemo, refresh } = useApp();
+  const { restaurants, createRestaurant, isDemo, refresh, setRestaurantDeliveryFee } = useApp();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -86,7 +131,17 @@ export default function RestaurantsScreen() {
           <View key={restaurant.id} style={styles.row}>
             <Text style={styles.code}>{restaurant.code}</Text>
             <Text style={styles.name}>{restaurant.name}</Text>
+            <Text style={styles.detail}>{restaurant.email}</Text>
             <Text style={styles.detail}>{restaurant.phone} · {restaurant.address}</Text>
+            <DeliveryFeeEditor
+              restaurantId={restaurant.id}
+              initialFee={restaurant.deliveryFeePiasters}
+              disabled={!isDemo && !isBackendConfigured}
+              onSave={setRestaurantDeliveryFee}
+            />
+            {!isDemo && isBackendConfigured ? (
+              <AdminAccountActions accountType="restaurant" accountId={restaurant.id} />
+            ) : null}
           </View>
         ))}
       </Section>
@@ -104,4 +159,5 @@ const styles = StyleSheet.create({
   code: { color: colors.primary, fontSize: 13, fontWeight: '800', textAlign: 'right' },
   name: { color: colors.text, fontSize: 16, fontWeight: '700', textAlign: 'right' },
   detail: { color: colors.muted, fontSize: 13, textAlign: 'right', writingDirection: 'rtl' },
+  feeEditor: { gap: spacing.sm, paddingTop: spacing.sm },
 });

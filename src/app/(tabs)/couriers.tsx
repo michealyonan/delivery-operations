@@ -1,16 +1,32 @@
 import { router } from 'expo-router';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { useState } from 'react';
-import { Alert, Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AdminAccountActions } from '../../components/admin-account-actions';
 import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../components/ui';
 import { isBackendConfigured } from '../../lib/supabase';
 import { useApp, toImagePickerInput } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
-import type { TemporaryCredentials } from '../../types';
+import type { Courier, TemporaryCredentials } from '../../types';
+
+function courierStatus(courier: Courier) {
+  if (courier.isTerminated) return 'إيقاف نهائي';
+  if (!courier.isActive) return 'الحساب موقوف';
+  if (courier.isOnBreak) return 'في بريك';
+  return courier.isOnShift ? 'على الشيفت' : 'غير متصل';
+}
 
 export default function CouriersScreen() {
-  const { couriers, createCourier, isDemo, refresh, setCourierActive } = useApp();
+  const {
+    couriers,
+    createCourier,
+    isDemo,
+    refresh,
+    setCourierActive,
+    breakRequestsEnabled,
+    setBreakRequestsEnabled,
+  } = useApp();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -22,6 +38,24 @@ export default function CouriersScreen() {
   const [busy, setBusy] = useState(false);
   const [busyCourierId, setBusyCourierId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [breakSettingBusy, setBreakSettingBusy] = useState(false);
+  const [breakSettingError, setBreakSettingError] = useState('');
+
+  const openCourier = (courierId: number) => {
+    router.push({ pathname: '/(tabs)/couriers/[id]', params: { id: String(courierId) } });
+  };
+
+  const toggleBreakRequests = async () => {
+    setBreakSettingBusy(true);
+    setBreakSettingError('');
+    try {
+      await setBreakRequestsEnabled(!breakRequestsEnabled);
+    } catch (error) {
+      setBreakSettingError(error instanceof Error ? error.message : 'تعذر تحديث إعدادات البريك.');
+    } finally {
+      setBreakSettingBusy(false);
+    }
+  };
 
   const toggleCourier = (courierId: number, isActive: boolean) => {
     const nextActive = !isActive;
@@ -139,21 +173,45 @@ export default function CouriersScreen() {
           بيانات الهوية وصورة البطاقة لا تُحفظ في المعاينة. اربط Supabase والتخزين الخاص قبل إدخال
           أي بيانات حقيقية.
         </Notice>
+        <Section title="طلبات البريك">
+          <Body>
+            {breakRequestsEnabled
+              ? 'طلبات البريك متاحة للمناديب.'
+              : 'طلبات البريك متوقفة؛ لن يستطيع المندوبون بدء بريك جديد.'}
+          </Body>
+          <ActionButton
+            disabled={breakSettingBusy}
+            loading={breakSettingBusy}
+            onPress={toggleBreakRequests}
+            tone={breakRequestsEnabled ? 'danger' : 'outline'}
+          >
+            {breakRequestsEnabled ? 'إيقاف طلبات البريك' : 'إتاحة طلبات البريك'}
+          </ActionButton>
+          {breakSettingError ? <Notice tone="danger">{breakSettingError}</Notice> : null}
+        </Section>
         <Section title="معاينة القائمة">
           {couriers.map((courier) => (
             <View key={courier.id} style={styles.listRow}>
-              <Text style={styles.code}>{courier.code}</Text>
-              <Text style={styles.name}>{courier.fullName}</Text>
+              <Pressable accessibilityRole="button" onPress={() => openCourier(courier.id)}>
+                <Text style={styles.code}>{courier.code}</Text>
+                <Text style={styles.name}>{courier.fullName}</Text>
+              </Pressable>
               <Text style={styles.detail}>
-                {courier.phone} · {!courier.isActive ? 'الحساب موقوف' : courier.isOnShift ? 'على الشيفت' : 'غير متصل'}
+                {courier.phone} · {courierStatus(courier)}
               </Text>
+              <Text style={styles.detail}>
+                العقد: {courier.contractStartDate} — {courier.contractEndDate}
+              </Text>
+              <ActionButton onPress={() => openCourier(courier.id)} tone="outline">
+                فتح ملف المندوب
+              </ActionButton>
               <ActionButton
-                disabled={busyCourierId !== null}
+                disabled={busyCourierId !== null || courier.isTerminated}
                 loading={busyCourierId === courier.id}
                 onPress={() => toggleCourier(courier.id, courier.isActive)}
                 tone={courier.isActive ? 'danger' : 'outline'}
               >
-                {courier.isActive ? 'إيقاف الحساب' : 'إعادة تفعيل الحساب'}
+                {courier.isTerminated ? 'تم الإيقاف النهائي' : courier.isActive ? 'إيقاف الحساب مؤقتًا' : 'إعادة تفعيل الحساب'}
               </ActionButton>
             </View>
           ))}
@@ -181,6 +239,20 @@ export default function CouriersScreen() {
       )}
 
       <Section title="مندوبون مسجلون">
+        <Body>
+          {breakRequestsEnabled
+            ? 'المندوبون يستطيعون طلب بريك من صفحة الدعم.'
+            : 'طلبات البريك الجديدة متوقفة حتى تعيد الإدارة إتاحتها.'}
+        </Body>
+        <ActionButton
+          disabled={breakSettingBusy}
+          loading={breakSettingBusy}
+          onPress={toggleBreakRequests}
+          tone={breakRequestsEnabled ? 'danger' : 'outline'}
+        >
+          {breakRequestsEnabled ? 'إيقاف طلبات البريك' : 'إتاحة طلبات البريك'}
+        </ActionButton>
+        {breakSettingError ? <Notice tone="danger">{breakSettingError}</Notice> : null}
         <ActionButton
           onPress={() => {
             refresh().catch((error: unknown) =>
@@ -193,19 +265,33 @@ export default function CouriersScreen() {
         </ActionButton>
         {couriers.map((courier) => (
           <View key={courier.id} style={styles.listRow}>
-            <Text style={styles.code}>{courier.code}</Text>
-            <Text style={styles.name}>{courier.fullName}</Text>
+            <Pressable accessibilityRole="button" onPress={() => openCourier(courier.id)}>
+              <Text style={styles.code}>{courier.code}</Text>
+              <Text style={styles.name}>{courier.fullName}</Text>
+            </Pressable>
             <Text style={styles.detail}>
-              {courier.phone} · {!courier.isActive ? 'الحساب موقوف' : courier.isOnShift ? 'على الشيفت' : 'غير متصل'}
+              {courier.phone} · {courierStatus(courier)}
             </Text>
+            <Text style={styles.detail}>
+              العقد: {courier.contractStartDate} — {courier.contractEndDate}
+            </Text>
+            {courier.isOnBreak && courier.breakUntil ? (
+              <Text style={styles.detail}>
+                ينتهي البريك: {new Date(courier.breakUntil).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
+              </Text>
+            ) : null}
+            <ActionButton onPress={() => openCourier(courier.id)} tone="outline">
+              فتح ملف المندوب
+            </ActionButton>
             <ActionButton
-              disabled={busyCourierId !== null}
+              disabled={busyCourierId !== null || courier.isTerminated}
               loading={busyCourierId === courier.id}
               onPress={() => toggleCourier(courier.id, courier.isActive)}
               tone={courier.isActive ? 'danger' : 'outline'}
             >
-              {courier.isActive ? 'إيقاف الحساب' : 'إعادة تفعيل الحساب'}
+              {courier.isTerminated ? 'تم الإيقاف النهائي' : courier.isActive ? 'إيقاف الحساب مؤقتًا' : 'إعادة تفعيل الحساب'}
             </ActionButton>
+            <AdminAccountActions accountType="courier" accountId={courier.id} />
           </View>
         ))}
       </Section>

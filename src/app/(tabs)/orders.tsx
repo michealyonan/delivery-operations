@@ -47,11 +47,11 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
       {profile?.role === 'admin' && order.status === 'pending' && (
         <View style={styles.assignArea}>
           <Text style={styles.assignLabel}>إسناد سريع إلى:</Text>
-          {couriers.filter((courier) => courier.isOnShift).length === 0 ? (
-            <Notice tone="warning">لا يوجد مندوب على الشيفت حاليًا.</Notice>
+          {couriers.filter(isEligibleCourier).length === 0 ? (
+            <Notice tone="warning">لا يوجد مندوب متاح على الشيفت حاليًا؛ يتم استبعاد الموجودين في بريك أو ذوي العقود المنتهية.</Notice>
           ) : (
             couriers
-              .filter((courier) => courier.isOnShift)
+              .filter(isEligibleCourier)
               .map((courier) => (
                 <ActionButton
                   key={courier.id}
@@ -68,6 +68,16 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
         </View>
       )}
     </View>
+  );
+}
+
+function isEligibleCourier(courier: ReturnType<typeof useApp>['couriers'][number]) {
+  return (
+    courier.isActive &&
+    !courier.isTerminated &&
+    courier.isOnShift &&
+    !courier.isOnBreak &&
+    courier.contractEndDate >= new Date().toISOString().slice(0, 10)
   );
 }
 

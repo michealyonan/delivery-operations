@@ -69,13 +69,29 @@ export default function SupportScreen() {
   const {
     profile,
     isDemo,
+    breakRequestsEnabled,
     supportRevision,
     loadSupportConversations,
+    requestCourierBreak,
+    refresh,
   } = useApp();
   const staff = profile?.role === 'admin' || profile?.role === 'support';
   const [conversations, setConversations] = useState<SupportConversation[]>([]);
   const [filter, setFilter] = useState<SupportConversationStatus | 'all'>('all');
   const [busy, setBusy] = useState(true);
+  const [breakBusy, setBreakBusy] = useState<number | null>(null);
+  const [breakError, setBreakError] = useState('');
+  const [breakMessage, setBreakMessage] = useState('');
+  const [clock, setClock] = useState(0);
+
+  useEffect(() => {
+    const firstUpdate = setTimeout(() => setClock(Date.now()), 0);
+    const timer = setInterval(() => setClock(Date.now()), 15_000);
+    return () => {
+      clearTimeout(firstUpdate);
+      clearInterval(timer);
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -104,7 +120,29 @@ export default function SupportScreen() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_messages' }, () => {
         void load();
       })
-      .subscribe((status) => {
+    if (profile?.role === 'courier' && profile.courierId) {
+      channel
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_settings' }, () => {
+          refresh().catch((error: unknown) =>
+            console.error('تعذر تحديث إعدادات البريك:', error),
+          );
+        })
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'courier_presence',
+            filter: `courier_id=eq.${profile.courierId}`,
+          },
+          () => {
+            refresh().catch((error: unknown) =>
+              console.error('تعذر تحديث حالة بريك المندوب:', error),
+            );
+          },
+        );
+    }
+    channel.subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.error(`تعذر الاتصال الفوري بصندوق الدعم: ${status}`);
         }
@@ -112,11 +150,28 @@ export default function SupportScreen() {
     return () => {
       void supabase?.removeChannel(channel);
     };
-  }, [isDemo, load, profile?.id]);
+  }, [isDemo, load, profile?.courierId, profile?.id, profile?.role, refresh]);
 
   const visible = staff
     ? conversations.filter((conversation) => filter === 'all' || conversation.status === filter)
     : conversations;
+  const breakUntil = profile?.breakUntil ? new Date(profile.breakUntil) : null;
+  const isOnBreak = Boolean(breakUntil && breakUntil.getTime() > clock);
+  const requestBreak = async (durationMinutes: number) => {
+    setBreakError('');
+    setBreakMessage('');
+    setBreakBusy(durationMinutes);
+    try {
+      const endTime = await requestCourierBreak(durationMinutes);
+      setBreakMessage(
+        `بدأ البريك لمدة ${durationMinutes} دقيقة، وينتهي ${new Date(endTime).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}.`,
+      );
+    } catch (error) {
+      setBreakError(error instanceof Error ? error.message : 'تعذر طلب البريك.');
+    } finally {
+      setBreakBusy(null);
+    }
+  };
 
   return (
     <Page>
@@ -154,6 +209,39 @@ export default function SupportScreen() {
             بدء محادثة جديدة
           </ActionButton>
         </>
+      )}
+      {profile?.role === 'courier' && (
+        <View style={styles.breakSection}>
+          <Text style={styles.breakTitle}>طلب بريك</Text>
+          {!breakRequestsEnabled ? (
+            <Notice tone="warning">طلبات البريك متوقفة حاليًا من الإدارة بسبب ضغط الطلبات.</Notice>
+          ) : isOnBreak && breakUntil ? (
+            <Notice tone="info">
+              أنت في بريك حتى {breakUntil.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}.
+            </Notice>
+          ) : !profile.isOnShift ? (
+            <Notice>ابدأ الشيفت أولًا حتى تتمكن من طلب بريك.</Notice>
+          ) : (
+            <>
+              <Body>سيبدأ البريك فورًا، ولن تصلك طلبات جديدة حتى انتهائه تلقائيًا.</Body>
+              <View style={styles.breakChoices}>
+                {[5, 10, 15, 20, 30, 60].map((duration) => (
+                  <ActionButton
+                    key={duration}
+                    disabled={breakBusy !== null || !breakRequestsEnabled || !profile.isOnShift}
+                    loading={breakBusy === duration}
+                    onPress={() => void requestBreak(duration)}
+                    tone="outline"
+                  >
+                    {duration} دقيقة
+                  </ActionButton>
+                ))}
+              </View>
+            </>
+          )}
+          {breakMessage ? <Notice tone="info">{breakMessage}</Notice> : null}
+          {breakError ? <Notice tone="danger">{breakError}</Notice> : null}
+        </View>
       )}
       {staff && (
         <View style={styles.filters}>
@@ -244,4 +332,7 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: 9, paddingVertical: 36, paddingHorizontal: spacing.md },
   emptyTitle: { color: colors.text, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   emptyBody: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: 'center' },
+  breakSection: { gap: spacing.sm },
+  breakTitle: { color: colors.text, fontSize: 18, fontWeight: '800', textAlign: 'right' },
+  breakChoices: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: spacing.sm },
 });

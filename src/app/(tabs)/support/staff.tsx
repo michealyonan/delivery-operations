@@ -2,7 +2,9 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { AdminAccountActions } from '../../../components/admin-account-actions';
 import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../../components/ui';
+import { isBackendConfigured } from '../../../lib/supabase';
 import { useApp } from '../../../state/app-context';
 import { colors, spacing } from '../../../theme';
 import type { SupportAgent, TemporaryCredentials } from '../../../types';
@@ -122,6 +124,10 @@ export default function SupportStaffScreen() {
             <View key={agent.id} style={styles.agent}>
               <Text style={styles.agentName}>{agent.name}</Text>
               <Text style={styles.agentEmail}>{agent.email}</Text>
+              {agent.phone ? <Text style={styles.agentEmail}>{agent.phone}</Text> : null}
+              {!isDemo && isBackendConfigured ? (
+                <AdminAccountActions accountType="support" accountId={agent.id} />
+              ) : null}
             </View>
           ))
         )}

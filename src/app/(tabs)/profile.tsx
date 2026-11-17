@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Image, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 
 import { ActionButton, Body, Heading, Notice, Page, Section, Subheading } from '../../components/ui';
 import { useApp } from '../../state/app-context';
@@ -9,14 +9,16 @@ import { colors, spacing } from '../../theme';
 export default function ProfileScreen() {
   const { profile, isDemo, signOut } = useApp();
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const leave = async () => {
     setBusy(true);
+    setErrorMessage('');
     try {
       await signOut();
       router.replace('/login');
     } catch (error) {
-      Alert.alert('تعذر تسجيل الخروج', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      setErrorMessage(error instanceof Error ? error.message : 'تعذر تسجيل الخروج. حاول مرة أخرى.');
     } finally {
       setBusy(false);
     }
@@ -52,6 +54,7 @@ export default function ProfileScreen() {
         {profile?.courierCode ? <Body>رقم المندوب: {profile.courierCode}</Body> : null}
       </Section>
       {isDemo && <Notice tone="warning">هذا حساب معاينة تجريبي ولا يحفظ البيانات على الخادم.</Notice>}
+      {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
       <ActionButton loading={busy} onPress={leave} tone="outline">تسجيل الخروج</ActionButton>
     </Page>
   );

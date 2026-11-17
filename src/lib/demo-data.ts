@@ -3,6 +3,7 @@ import type {
   Courier,
   DeliveryOrder,
   Restaurant,
+  RestaurantMenuItem,
   SupportAgent,
   SupportConversation,
   SupportMessage,
@@ -86,6 +87,10 @@ export const demoCouriers: Courier[] = [
     email: 'courier@example.test',
     isActive: true,
     isOnShift: true,
+    isOnBreak: false,
+    contractStartDate: today.slice(0, 10),
+    contractEndDate: new Date(new Date(today).setFullYear(now.getFullYear() + 1)).toISOString().slice(0, 10),
+    isTerminated: false,
   },
   {
     id: 2,
@@ -95,6 +100,10 @@ export const demoCouriers: Courier[] = [
     email: 'courier2@example.test',
     isActive: true,
     isOnShift: true,
+    isOnBreak: false,
+    contractStartDate: today.slice(0, 10),
+    contractEndDate: new Date(new Date(today).setFullYear(now.getFullYear() + 1)).toISOString().slice(0, 10),
+    isTerminated: false,
   },
 ];
 
@@ -108,6 +117,7 @@ export const demoRestaurants: Restaurant[] = [
     address: 'عنوان المطعم التجريبي',
     latitude: 30.0444,
     longitude: 31.2357,
+    deliveryFeePiasters: 4500,
   },
   {
     id: 2,
@@ -116,7 +126,15 @@ export const demoRestaurants: Restaurant[] = [
     email: 'restaurant2@example.test',
     phone: '02 0000 0001',
     address: 'عنوان توضيحي آخر',
+    deliveryFeePiasters: 2750,
   },
+];
+
+export const demoRestaurantMenuItems: RestaurantMenuItem[] = [
+  { id: 1, name: 'وجبة دجاج', pricePiasters: 16500, isAvailable: true },
+  { id: 2, name: 'وجبة لحم', pricePiasters: 22000, isAvailable: true },
+  { id: 3, name: 'مشروب', pricePiasters: 2500, isAvailable: true },
+  { id: 4, name: 'بطاطس', pricePiasters: 4500, isAvailable: false },
 ];
 
 export const demoSupportAgents: SupportAgent[] = [
@@ -178,6 +196,7 @@ export function demoProfile(role: AppProfile['role']): AppProfile {
       name: demoRestaurants[0].name,
       email: demoRestaurants[0].email,
       restaurantId: demoRestaurants[0].id,
+      deliveryFeePiasters: demoRestaurants[0].deliveryFeePiasters,
     };
   }
   if (role === 'support') {

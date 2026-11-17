@@ -42,8 +42,10 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
 }
 
 function AdminHome() {
-  const { orders, couriers, locations, isDemo, refresh } = useApp();
+  const { orders, couriers, locations, isDemo, refresh, signOut } = useApp();
   const [elapsed, setElapsed] = useState(0);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   useEffect(() => {
     const timer = setInterval(() => setElapsed((value) => value + 30_000), 30_000);
     return () => clearInterval(timer);
@@ -53,7 +55,7 @@ function AdminHome() {
     (order) => order.status === 'delivered' && order.deliveredAt && isToday(order.deliveredAt),
   ).length;
   const pending = orders.filter((order) => order.status === 'pending').length;
-  const onShift = couriers.filter((courier) => courier.isOnShift).length;
+  const onShift = couriers.filter((courier) => courier.isOnShift && !courier.isOnBreak && courier.isActive && !courier.isTerminated).length;
   const activeOrders = orders.filter(
     (order) => ['assigned', 'accepted', 'picked_up'].includes(order.status),
   );
@@ -63,6 +65,19 @@ function AdminHome() {
       await refresh();
     } catch (error) {
       Alert.alert('تعذر التحديث', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+    }
+  };
+
+  const logout = async () => {
+    setLogoutBusy(true);
+    setLogoutError('');
+    try {
+      await signOut();
+      router.replace('/login');
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'تعذر تسجيل الخروج. حاول مرة أخرى.');
+    } finally {
+      setLogoutBusy(false);
     }
   };
 
@@ -79,13 +94,16 @@ function AdminHome() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/(tabs)/profile')}
-            style={styles.iconButton}
+            accessibilityLabel="تسجيل الخروج"
+            disabled={logoutBusy}
+            onPress={logout}
+            style={[styles.iconButton, logoutBusy && styles.logoutButtonDisabled]}
           >
-            <MaterialCommunityIcons name="account-circle-outline" size={23} color={colors.primary} />
+            <MaterialCommunityIcons name="logout" size={23} color={colors.danger} />
           </Pressable>
         </View>
       </View>
+      {logoutError ? <Notice tone="danger">{logoutError}</Notice> : null}
       {isDemo && <Notice tone="warning">معاينة ببيانات توضيحية فقط؛ لا يوجد تتبع مباشر في الوضع التجريبي.</Notice>}
       <View style={styles.metrics}>
         <Metric value={String(pending)} label="بانتظار الإسناد" />
@@ -196,6 +214,9 @@ function RestaurantHome() {
         <Metric value={String(ownOrders.length)} label="إجمالي الطلبات" />
         <Metric value={String(onShiftCount)} label="في التوصيل" />
       </View>
+      <ActionButton onPress={() => router.push('/orders/menu')} tone="outline">
+        إدارة أصناف المطعم وأسعارها
+      </ActionButton>
       <ActionButton onPress={() => router.push('/orders/new')}>إنشاء طلب جديد</ActionButton>
       <Section title="موقع المطعم">
         <Notice>
@@ -221,6 +242,7 @@ function CourierHome() {
   const { profile, orders, isDemo, setShift } = useApp();
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState(Boolean(profile?.isOnShift));
+  const [shiftError, setShiftError] = useState('');
   const myOrders = orders.filter((order) => order.courierId === profile?.courierId);
   const todayOrders = myOrders.filter((order) => order.deliveredAt && isToday(order.deliveredAt));
   const todayCollected = todayOrders.reduce(
@@ -230,11 +252,12 @@ function CourierHome() {
 
   const toggleShift = async () => {
     setBusy(true);
+    setShiftError('');
     try {
       await setShift(!active);
       setActive(!active);
     } catch (error) {
-      Alert.alert('تعذر تغيير الشيفت', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      setShiftError(error instanceof Error ? error.message : 'تعذر تغيير الشيفت. حاول مرة أخرى.');
     } finally {
       setBusy(false);
     }
@@ -259,8 +282,10 @@ function CourierHome() {
           onPress={toggleShift}
           tone={active ? 'outline' : 'primary'}
         >
-          {active ? 'إيقاف الشيفت' : 'بدء الشيفت ومشاركة الموقع'}
+          {active ? 'إيقاف الشيفت' : 'بدء الشيفت'}
         </ActionButton>
+        {busy ? <Body>جارٍ طلب إذن الموقع وتأكيد أول تحديث لموقعك...</Body> : null}
+        {shiftError ? <Notice tone="danger">{shiftError}</Notice> : null}
       </View>
       <View style={styles.metrics}>
         <Metric value={String(todayOrders.length)} label="طلبات تم توصيلها اليوم" />
@@ -302,6 +327,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  logoutButtonDisabled: { opacity: 0.6 },
   metrics: {
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',

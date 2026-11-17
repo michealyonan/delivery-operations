@@ -124,17 +124,30 @@ export default function OrderDetailScreen() {
       </Section>
 
       <Section title="أصناف الطلب">
-        {order.itemsText.split(/\r?\n/).filter(Boolean).map((item, index) => (
-          <View key={`${index}-${item}`} style={styles.itemRow}>
-            <Text style={styles.itemIndex}>{index + 1}</Text>
-            <Text style={styles.itemText}>{item}</Text>
-          </View>
-        ))}
+        {order.lineItems?.length
+          ? order.lineItems.map((item, index) => (
+              <View key={item.id} style={styles.itemRow}>
+                <Text style={styles.itemIndex}>{index + 1}</Text>
+                <View style={styles.itemDetails}>
+                  <Text style={styles.itemText}>{item.name} × {item.quantity}</Text>
+                  <Text style={styles.itemSubtext}>
+                    {money(item.unitPricePiasters)} للصنف · الإجمالي {money(item.lineTotalPiasters)}
+                  </Text>
+                </View>
+              </View>
+            ))
+          : order.itemsText.split(/\r?\n/).filter(Boolean).map((item, index) => (
+              <View key={`${index}-${item}`} style={styles.itemRow}>
+                <Text style={styles.itemIndex}>{index + 1}</Text>
+                <Text style={styles.itemText}>{item}</Text>
+              </View>
+            ))}
         {order.notes ? <Notice>ملاحظات: {order.notes}</Notice> : null}
       </Section>
 
       <Section title="المبالغ">
-        <Body>المطلوب من العميل: {money(order.amountDuePiasters)}</Body>
+        <Body>رسوم التوصيل المحددة من الإدارة: {money(order.deliveryFeePiasters)}</Body>
+        <Body>إجمالي المبلغ المطلوب من العميل: {money(order.amountDuePiasters)}</Body>
         <Body>المطلوب دفعه للمطعم: {money(order.restaurantDuePiasters)}</Body>
       </Section>
 
@@ -259,4 +272,6 @@ const styles = StyleSheet.create({
   itemRow: { flexDirection: 'row-reverse', gap: spacing.sm, alignItems: 'flex-start' },
   itemIndex: { color: colors.primary, fontWeight: '800', width: 22, textAlign: 'center' },
   itemText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 23, textAlign: 'right', writingDirection: 'rtl' },
+  itemDetails: { flex: 1, gap: 4 },
+  itemSubtext: { color: colors.muted, fontSize: 12, textAlign: 'right', writingDirection: 'rtl' },
 });

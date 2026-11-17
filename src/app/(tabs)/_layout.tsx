@@ -67,6 +67,10 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="couriers/[id]"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
         name="restaurants"
         options={{
           title: 'المطاعم',

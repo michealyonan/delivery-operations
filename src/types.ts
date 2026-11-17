@@ -19,11 +19,16 @@ export interface AppProfile {
   profilePhotoUrl?: string;
   restaurantId?: number;
   restaurantAddress?: string;
+  deliveryFeePiasters?: number;
   restaurantLatitude?: number;
   restaurantLongitude?: number;
   courierId?: number;
   courierCode?: string;
   isOnShift?: boolean;
+  breakUntil?: string;
+  contractStartDate?: string;
+  contractEndDate?: string;
+  isTerminated?: boolean;
 }
 
 export interface CourierLocation {
@@ -44,6 +49,11 @@ export interface Courier {
   idCardPath?: string;
   isActive: boolean;
   isOnShift: boolean;
+  isOnBreak: boolean;
+  breakUntil?: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  isTerminated: boolean;
   location?: CourierLocation;
 }
 
@@ -56,6 +66,7 @@ export interface Restaurant {
   address: string;
   latitude?: number;
   longitude?: number;
+  deliveryFeePiasters: number;
 }
 
 export interface DeliveryOrder {
@@ -75,7 +86,9 @@ export interface DeliveryOrder {
   itemsText: string;
   notes: string;
   amountDuePiasters: number;
+  deliveryFeePiasters?: number;
   restaurantDuePiasters: number;
+  lineItems?: OrderLineItem[];
   collectedPiasters?: number;
   paidToRestaurantPiasters?: number;
   status: OrderStatus;
@@ -84,14 +97,28 @@ export interface DeliveryOrder {
   deliveredAt?: string;
 }
 
+export interface OrderLineItem {
+  id: number;
+  menuItemId?: number;
+  name: string;
+  quantity: number;
+  unitPricePiasters: number;
+  lineTotalPiasters: number;
+}
+
+export interface RestaurantMenuItem {
+  id: number;
+  name: string;
+  pricePiasters: number;
+  isAvailable: boolean;
+}
+
 export interface NewOrderInput {
   customerName: string;
   customerPhone: string;
   customerAddress: string;
-  itemsText: string;
   notes: string;
-  amountDuePiasters: number;
-  restaurantDuePiasters: number;
+  items: { itemId: number; quantity: number }[];
 }
 
 export interface NewCourierInput {
@@ -155,7 +182,46 @@ export interface SupportAgent {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   createdAt: string;
+}
+
+export type ManagedAccountType = 'courier' | 'restaurant' | 'support';
+
+export interface CourierPrivateDetails {
+  id: number;
+  code: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  nationalId: string;
+  address: string;
+  idCardUrl: string;
+  selfieUrl?: string;
+  isActive: boolean;
+  isOnShift: boolean;
+  breakUntil?: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  terminatedAt?: string;
+}
+
+export interface CourierProfileUpdateInput {
+  fullName: string;
+  email: string;
+  phone: string;
+  nationalId: string;
+  address: string;
+  idCard?: {
+    base64: string;
+    mimeType: string;
+    fileSize?: number;
+  };
+  selfie?: {
+    base64: string;
+    mimeType: string;
+    fileSize?: number;
+  };
 }
 
 export interface NewSupportAgentInput {
