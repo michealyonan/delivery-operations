@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -35,6 +35,7 @@ export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
     profile,
+    hasLoadedData,
     orders,
     orderAssignmentAttempts,
     orderReturns,
@@ -51,8 +52,40 @@ export default function OrderDetailScreen() {
     completeOrderReturn,
     confirmOrderReturn,
     requestOrderTransfer,
+    refresh,
   } = useApp();
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
+  const attemptedOrderLookups = useRef(new Set<string>());
+  const [orderLookup, setOrderLookup] = useState<{
+    orderId: string;
+    status: 'loading' | 'loaded' | 'error';
+    error?: string;
+  } | null>(null);
+  const refreshMissingOrder = useCallback(
+    async (force = false) => {
+      if (!id || !profile || (!force && attemptedOrderLookups.current.has(id))) return;
+      attemptedOrderLookups.current.add(id);
+      setOrderLookup({ orderId: id, status: 'loading' });
+      try {
+        await refresh();
+        setOrderLookup({ orderId: id, status: 'loaded' });
+      } catch (error) {
+        setOrderLookup({
+          orderId: id,
+          status: 'error',
+          error: error instanceof Error ? error.message : 'حاول مرة أخرى.',
+        });
+      }
+    },
+    [id, profile, refresh],
+  );
+  useEffect(() => {
+    if (order || !hasLoadedData) return;
+    const timer = setTimeout(() => {
+      void refreshMissingOrder();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [hasLoadedData, order, refreshMissingOrder]);
   const orderReturn = orderReturns.find((item) => item.orderId === id);
   const canCourierViewOrderTimes =
     order?.status === 'delivered' ||
@@ -134,12 +167,36 @@ export default function OrderDetailScreen() {
       ? contactResult.contact
       : null;
   if (!order) {
+    const lookupIsPending =
+      !hasLoadedData ||
+      orderLookup?.orderId !== id ||
+      orderLookup.status === 'loading';
     return (
       <Page>
         <ActionButton onPress={() => router.replace('/(tabs)/orders')} tone="outline">
           رجوع للخلف
         </ActionButton>
-        <Heading>الطلب غير موجود</Heading>
+        {lookupIsPending ? (
+          <Notice>جارٍ تحميل تفاصيل الطلب والتحقق من صلاحية الوصول...</Notice>
+        ) : orderLookup?.status === 'error' ? (
+          <>
+            <Heading>تعذر تحميل تفاصيل الطلب</Heading>
+            <Notice tone="danger">{orderLookup.error}</Notice>
+            <ActionButton onPress={() => void refreshMissingOrder(true)} tone="secondary">
+              إعادة المحاولة
+            </ActionButton>
+          </>
+        ) : (
+          <>
+            <Heading>الطلب غير موجود</Heading>
+            <Notice>
+              قد يكون الطلب حُذف أو لا يمكن لحسابك الوصول إليه. إذا كان الطلب ظاهرًا في القائمة، حدّث البيانات وحاول مرة أخرى.
+            </Notice>
+            <ActionButton onPress={() => void refreshMissingOrder(true)} tone="secondary">
+              تحديث الطلبات
+            </ActionButton>
+          </>
+        )}
       </Page>
     );
   }
