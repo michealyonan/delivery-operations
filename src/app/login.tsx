@@ -69,7 +69,15 @@ export default function LoginScreen() {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: redirectUrl.toString(),
       });
-      if (error) throw error;
+      if (error) {
+        if (/redirect.*(not allowed|invalid|url)/i.test(error.message)) {
+          setErrorMessage(
+            `اسمح بهذا الرابط في Supabase من Authentication > URL Configuration > Redirect URLs: ${redirectUrl.toString()}`,
+          );
+          return;
+        }
+        throw error;
+      }
       setStatusMessage(
         'إذا كان البريد مسجلًا، سيصلك رابط استعادة كلمة المرور. افحص البريد الوارد والرسائل غير المرغوب فيها.',
       );
