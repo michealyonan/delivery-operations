@@ -1,4 +1,12 @@
-import type { AppProfile, Courier, DeliveryOrder, Restaurant } from '../types';
+import type {
+  AppProfile,
+  Courier,
+  DeliveryOrder,
+  Restaurant,
+  SupportAgent,
+  SupportConversation,
+  SupportMessage,
+} from '../types';
 
 const now = new Date();
 const today = now.toISOString();
@@ -46,7 +54,7 @@ export const demoOrders: DeliveryOrder[] = [
     notes: '',
     amountDuePiasters: 18000,
     restaurantDuePiasters: 14500,
-    status: 'accepted',
+    status: 'picked_up',
     createdAt: today,
     acceptedAt: today,
   },
@@ -76,6 +84,7 @@ export const demoCouriers: Courier[] = [
     fullName: 'مندوب تجريبي',
     phone: '010 0000 0000',
     email: 'courier@example.test',
+    isActive: true,
     isOnShift: true,
   },
   {
@@ -84,7 +93,8 @@ export const demoCouriers: Courier[] = [
     fullName: 'مندوب تجريبي آخر',
     phone: '010 0000 0004',
     email: 'courier2@example.test',
-    isOnShift: false,
+    isActive: true,
+    isOnShift: true,
   },
 ];
 
@@ -109,6 +119,54 @@ export const demoRestaurants: Restaurant[] = [
   },
 ];
 
+export const demoSupportAgents: SupportAgent[] = [
+  {
+    id: 'demo-support',
+    name: 'موظف الدعم التجريبي',
+    email: 'support@example.test',
+    createdAt: today,
+  },
+];
+
+export const demoSupportConversations: SupportConversation[] = [
+  {
+    id: 'demo-support-conversation',
+    openedBy: 'demo-courier',
+    requesterRole: 'courier',
+    requesterName: 'مندوب تجريبي',
+    subject: 'مشكلة في استلام الطلب',
+    relatedOrderId: 'demo-order-1002',
+    relatedOrderCode: 'DEMO-1002',
+    status: 'in_progress',
+    assignedTo: 'demo-support',
+    assignedName: 'موظف الدعم التجريبي',
+    lastMessageBody: 'راجع حالة الطلب وأبلغني لو احتجت مساعدة أخرى.',
+    lastMessageAt: today,
+    createdAt: today,
+  },
+];
+
+export const demoSupportMessages: SupportMessage[] = [
+  {
+    id: 1,
+    conversationId: 'demo-support-conversation',
+    senderId: 'demo-courier',
+    senderName: 'مندوب تجريبي',
+    senderRole: 'courier',
+    body: 'الطلب ظاهر عندي لكن المطعم يقول إنه لم يجهزه بعد.',
+    createdAt: today,
+  },
+  {
+    id: 2,
+    conversationId: 'demo-support-conversation',
+    senderId: 'demo-support',
+    senderName: 'موظف الدعم التجريبي',
+    senderRole: 'support',
+    body: 'راجع حالة الطلب وأبلغني لو احتجت مساعدة أخرى.',
+    createdAt: today,
+  },
+];
+
 export function demoProfile(role: AppProfile['role']): AppProfile {
   if (role === 'admin') {
     return { id: 'demo-admin', role, name: 'إدارة تجريبية' };
@@ -120,6 +178,14 @@ export function demoProfile(role: AppProfile['role']): AppProfile {
       name: demoRestaurants[0].name,
       email: demoRestaurants[0].email,
       restaurantId: demoRestaurants[0].id,
+    };
+  }
+  if (role === 'support') {
+    return {
+      id: 'demo-support',
+      role,
+      name: demoSupportAgents[0].name,
+      email: demoSupportAgents[0].email,
     };
   }
   return {

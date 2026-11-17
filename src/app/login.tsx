@@ -12,6 +12,7 @@ const demoRoles: { role: UserRole; label: string }[] = [
   { role: 'admin', label: 'الإدارة' },
   { role: 'restaurant', label: 'مطعم تجريبي' },
   { role: 'courier', label: 'مندوب تجريبي' },
+  { role: 'support', label: 'موظف دعم تجريبي' },
 ];
 
 export default function LoginScreen() {
@@ -27,8 +28,8 @@ export default function LoginScreen() {
     }
     setBusy(true);
     try {
-      await signIn(email.trim(), password);
-      router.replace('/(tabs)');
+      const role = await signIn(email.trim(), password);
+      router.replace(role === 'support' ? '/(tabs)/support' : '/(tabs)');
     } catch (error) {
       Alert.alert('تعذر تسجيل الدخول', error instanceof Error ? error.message : 'حاول مرة أخرى.');
     } finally {
@@ -38,7 +39,7 @@ export default function LoginScreen() {
 
   const openDemo = (role: UserRole) => {
     signInDemo(role);
-    router.replace('/(tabs)');
+    router.replace(role === 'support' ? '/(tabs)/support' : '/(tabs)');
   };
 
   return (

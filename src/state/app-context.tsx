@@ -11,7 +11,15 @@ import {
 } from 'react';
 import { Platform } from 'react-native';
 
-import { demoCouriers, demoOrders, demoProfile, demoRestaurants } from '../lib/demo-data';
+import {
+  demoCouriers,
+  demoOrders,
+  demoProfile,
+  demoRestaurants,
+  demoSupportAgents,
+  demoSupportConversations,
+  demoSupportMessages,
+} from '../lib/demo-data';
 import { isBackendConfigured, supabase } from '../lib/supabase';
 import type {
   AppProfile,
@@ -21,8 +29,13 @@ import type {
   NewCourierInput,
   NewOrderInput,
   NewRestaurantInput,
+  NewSupportAgentInput,
   OrderStatus,
   Restaurant,
+  SupportAgent,
+  SupportConversation,
+  SupportConversationStatus,
+  SupportMessage,
   TemporaryCredentials,
   UserRole,
 } from '../types';
@@ -35,7 +48,23 @@ interface AppContextValue {
   couriers: Courier[];
   restaurants: Restaurant[];
   locations: CourierLocation[];
-  signIn: (email: string, password: string) => Promise<void>;
+  supportRevision: number;
+  loadSupportConversations: () => Promise<SupportConversation[]>;
+  loadSupportMessages: (conversationId: string) => Promise<SupportMessage[]>;
+  listSupportAgents: () => Promise<SupportAgent[]>;
+  createSupportConversation: (
+    subject: string,
+    body: string,
+    relatedOrderId?: string,
+  ) => Promise<string>;
+  sendSupportMessage: (conversationId: string, body: string) => Promise<void>;
+  claimSupportConversation: (conversationId: string) => Promise<void>;
+  setSupportConversationStatus: (
+    conversationId: string,
+    status: SupportConversationStatus,
+  ) => Promise<void>;
+  createSupportAgent: (input: NewSupportAgentInput) => Promise<TemporaryCredentials>;
+  signIn: (email: string, password: string) => Promise<UserRole>;
   signInDemo: (role: UserRole) => void;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -47,6 +76,7 @@ interface AppContextValue {
   advanceOrder: (orderId: string, status: 'picked_up' | 'delivered') => Promise<void>;
   recordCash: (orderId: string, collectedPiasters: number, paidPiasters: number) => Promise<void>;
   setShift: (active: boolean) => Promise<void>;
+  setCourierActive: (courierId: number, active: boolean) => Promise<void>;
   getCourierContact: (orderId: string) => Promise<{ name: string; phone: string } | null>;
   setRestaurantLocation: (latitude: number, longitude: number) => Promise<void>;
 }
@@ -98,6 +128,36 @@ function mapOrder(row: Record<string, unknown>): DeliveryOrder {
   };
 }
 
+function mapSupportConversation(row: Record<string, unknown>): SupportConversation {
+  return {
+    id: String(row.id),
+    openedBy: String(row.opened_by),
+    requesterRole: row.requester_role as SupportConversation['requesterRole'],
+    requesterName: String(row.requester_name),
+    subject: String(row.subject),
+    relatedOrderId: row.related_order_id == null ? undefined : String(row.related_order_id),
+    relatedOrderCode: row.related_order_code == null ? undefined : String(row.related_order_code),
+    status: row.status as SupportConversationStatus,
+    assignedTo: row.assigned_to == null ? undefined : String(row.assigned_to),
+    assignedName: row.assigned_name == null ? undefined : String(row.assigned_name),
+    lastMessageBody: String(row.last_message_body ?? ''),
+    lastMessageAt: String(row.last_message_at),
+    createdAt: String(row.created_at),
+  };
+}
+
+function mapSupportMessage(row: Record<string, unknown>): SupportMessage {
+  return {
+    id: asNumber(row.id),
+    conversationId: String(row.conversation_id),
+    senderId: String(row.sender_id),
+    senderName: String(row.sender_name),
+    senderRole: row.sender_role as UserRole,
+    body: String(row.body),
+    createdAt: String(row.created_at),
+  };
+}
+
 export function AppProvider({ children }: PropsWithChildren) {
   const [profile, setProfile] = useState<AppProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,6 +166,13 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [locations, setLocations] = useState<CourierLocation[]>([]);
+  const [demoConversations, setDemoConversations] = useState(
+    demoSupportConversations.map((conversation) => ({ ...conversation })),
+  );
+  const [demoMessages, setDemoMessages] = useState(
+    demoSupportMessages.map((message) => ({ ...message })),
+  );
+  const [supportRevision, setSupportRevision] = useState(0);
 
   const loadProfile = useCallback(async (userId: string): Promise<AppProfile> => {
     const client = assertBackend();
@@ -115,7 +182,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       .eq('id', userId)
       .single();
     if (error) throw error;
-    if (!record || !['admin', 'restaurant', 'courier'].includes(record.role)) {
+    if (!record || !['admin', 'restaurant', 'courier', 'support'].includes(record.role)) {
       throw new Error('نوع الحساب غير معروف. تواصل مع الإدارة.');
     }
 
@@ -184,7 +251,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       .order('created_at', { ascending: false });
     if (ordersError) throw ordersError;
     let cashByOrder = new Map<string, { collected: number; paid: number }>();
-    if (profile.role !== 'restaurant') {
+    if (profile.role === 'admin' || profile.role === 'courier') {
       const { data: cashRows, error: cashError } = await supabase
         .from('order_cash')
         .select('order_id, collected_piasters, paid_to_restaurant_piasters');
@@ -217,7 +284,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
     const { data: courierRows, error: couriersError } = await supabase
       .from('couriers')
-      .select('id, courier_code, user_id, full_name, phone, email, courier_presence(is_on_shift)');
+      .select('id, courier_code, user_id, full_name, phone, email, is_active, courier_presence(is_on_shift)');
     if (couriersError) throw couriersError;
     setCouriers(
       (courierRows ?? []).map((item) => {
@@ -230,7 +297,8 @@ export function AppProvider({ children }: PropsWithChildren) {
           fullName: item.full_name,
           phone: item.phone,
           email: item.email,
-          isOnShift: Boolean(presence?.is_on_shift),
+          isActive: item.is_active,
+          isOnShift: item.is_active && Boolean(presence?.is_on_shift),
         };
       }),
     );
@@ -356,6 +424,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const nextProfile = await loadProfile(data.user.id);
       setIsDemo(false);
       setProfile(nextProfile);
+      return nextProfile.role;
     },
     [loadProfile],
   );
@@ -367,6 +436,8 @@ export function AppProvider({ children }: PropsWithChildren) {
     setCouriers(demoCouriers.map((courier) => ({ ...courier })));
     setRestaurants(demoRestaurants.map((restaurant) => ({ ...restaurant })));
     setLocations([]);
+    setDemoConversations(demoSupportConversations.map((conversation) => ({ ...conversation })));
+    setDemoMessages(demoSupportMessages.map((message) => ({ ...message })));
   }, []);
 
   const signOut = useCallback(async () => {
@@ -520,33 +591,398 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const assignOrder = useCallback(
     async (orderId: string, courierId: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إسناد الطلبات متاح للإدارة فقط.');
+      }
       if (isDemo) {
-        const courier = demoCouriers.find((item) => item.id === courierId);
+        const courier = couriers.find((item) => item.id === courierId);
+        if (!courier?.isActive || !courier.isOnShift) {
+          throw new Error('اختر مندوبًا نشطًا وعلى الشيفت.');
+        }
+        const order = orders.find((item) => item.id === orderId);
+        if (!order || !['pending', 'assigned', 'accepted', 'picked_up'].includes(order.status)) {
+          throw new Error('لا يمكن تحويل هذا الطلب بعد الآن.');
+        }
         setOrders((current) =>
           current.map((order) =>
             order.id === orderId
               ? {
                   ...order,
                   courierId,
-                  courierName: courier?.fullName,
-                  courierPhone: courier?.phone,
+                  courierName: courier.fullName,
+                  courierPhone: courier.phone,
                   status: 'assigned',
+                  acceptedAt: undefined,
                 }
-              : order,
+                : order,
           ),
         );
         return;
       }
       const client = assertBackend();
-      const { error } = await client
-        .from('orders')
-        .update({ courier_id: courierId, status: 'assigned', assigned_at: new Date().toISOString() })
-        .eq('id', orderId)
-        .eq('status', 'pending');
+      const { error } = await client.rpc('admin_assign_order', {
+        p_order_id: orderId,
+        p_courier_id: courierId,
+      });
       if (error) throw error;
       await refresh();
     },
-    [isDemo, refresh],
+    [couriers, isDemo, orders, profile, refresh],
+  );
+
+  const setCourierActive = useCallback(
+    async (courierId: number, active: boolean) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إدارة حسابات المندوبين متاحة للإدارة فقط.');
+      }
+      if (isDemo) {
+        if (!active && orders.some(
+          (order) =>
+            order.courierId === courierId &&
+            ['assigned', 'accepted', 'picked_up'].includes(order.status),
+        )) {
+          throw new Error('حوّل أو أكمل طلبات المندوب غير المنتهية قبل إيقاف الحساب.');
+        }
+        if (!couriers.some((item) => item.id === courierId)) {
+          throw new Error('حساب المندوب غير موجود.');
+        }
+        setCouriers((current) =>
+          current.map((item) =>
+            item.id === courierId
+              ? { ...item, isActive: active, isOnShift: active && item.isOnShift }
+              : item,
+          ),
+        );
+        return;
+      }
+      const { data, error } = await assertBackend().functions.invoke('admin-manage-courier', {
+        body: { courierId, isActive: active },
+      });
+      if (error) {
+        if (error.context instanceof Response) {
+          const response = await error.context.json().catch(() => null);
+          if (typeof response?.error === 'string') throw new Error(response.error);
+        }
+        throw error;
+      }
+      if (typeof data?.error === 'string') throw new Error(data.error);
+      await refresh();
+    },
+    [couriers, isDemo, orders, profile, refresh],
+  );
+
+  const loadSupportConversations = useCallback(async () => {
+    if (!profile) throw new Error('سجّل الدخول لفتح الدعم الفني.');
+    if (isDemo) {
+      return demoConversations
+        .filter(
+          (conversation) =>
+            profile.role === 'admin' ||
+            profile.role === 'support' ||
+            conversation.openedBy === profile.id,
+        )
+        .sort((left, right) => right.lastMessageAt.localeCompare(left.lastMessageAt));
+    }
+
+    const { data, error } = await assertBackend()
+      .from('support_conversations')
+      .select(
+        'id, opened_by, requester_role, requester_name, subject, related_order_id, related_order_code, status, assigned_to, assigned_name, last_message_body, last_message_at, created_at',
+      )
+      .order('last_message_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map((row) =>
+      mapSupportConversation(row as Record<string, unknown>),
+    );
+  }, [demoConversations, isDemo, profile]);
+
+  const loadSupportMessages = useCallback(
+    async (conversationId: string) => {
+      if (!profile) throw new Error('سجّل الدخول لفتح المحادثة.');
+      if (isDemo) {
+        const conversation = demoConversations.find((item) => item.id === conversationId);
+        if (
+          !conversation ||
+          (profile.role !== 'admin' &&
+            profile.role !== 'support' &&
+            conversation.openedBy !== profile.id)
+        ) {
+          throw new Error('هذه المحادثة غير متاحة لهذا الحساب.');
+        }
+        return demoMessages.filter((message) => message.conversationId === conversationId);
+      }
+
+      const { data, error } = await assertBackend()
+        .from('support_messages')
+        .select('id, conversation_id, sender_id, sender_name, sender_role, body, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data ?? []).map((row) => mapSupportMessage(row as Record<string, unknown>));
+    },
+    [demoConversations, demoMessages, isDemo, profile],
+  );
+
+  const listSupportAgents = useCallback(async () => {
+    if (!profile || profile.role !== 'admin') {
+      throw new Error('قائمة موظفي الدعم متاحة للإدارة فقط.');
+    }
+    if (isDemo) return demoSupportAgents.map((agent) => ({ ...agent }));
+
+    const { data, error } = await assertBackend()
+      .from('profiles')
+      .select('id, full_name, email, created_at')
+      .eq('role', 'support')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      name: row.full_name,
+      email: row.email,
+      createdAt: row.created_at,
+    }));
+  }, [isDemo, profile]);
+
+  const createSupportConversation = useCallback(
+    async (subject: string, body: string, relatedOrderId?: string) => {
+      if (!profile || (profile.role !== 'courier' && profile.role !== 'restaurant')) {
+        throw new Error('بدء محادثة دعم متاح للمندوبين والمطاعم فقط.');
+      }
+      const cleanSubject = subject.trim();
+      const cleanBody = body.trim();
+      if (cleanSubject.length < 3 || cleanSubject.length > 120) {
+        throw new Error('اكتب عنوانًا من 3 إلى 120 حرفًا.');
+      }
+      if (!cleanBody || cleanBody.length > 4000) {
+        throw new Error('اكتب رسالة من 1 إلى 4000 حرف.');
+      }
+      if (isDemo) {
+        const relatedOrder = relatedOrderId
+          ? orders.find(
+              (order) =>
+                order.id === relatedOrderId &&
+                (profile.role === 'restaurant'
+                  ? order.restaurantId === profile.restaurantId
+                  : order.courierId === profile.courierId),
+            )
+          : undefined;
+        if (relatedOrderId && !relatedOrder) {
+          throw new Error('الطلب المختار غير متاح لهذا الحساب.');
+        }
+        const id = `demo-support-${Date.now()}`;
+        const createdAt = new Date().toISOString();
+        const conversation: SupportConversation = {
+          id,
+          openedBy: profile.id,
+          requesterRole: profile.role,
+          requesterName: profile.name,
+          subject: cleanSubject,
+          relatedOrderId: relatedOrder?.id,
+          relatedOrderCode: relatedOrder?.code,
+          status: 'open',
+          lastMessageBody: cleanBody.slice(0, 300),
+          lastMessageAt: createdAt,
+          createdAt,
+        };
+        const message: SupportMessage = {
+          id: Date.now(),
+          conversationId: id,
+          senderId: profile.id,
+          senderName: profile.name,
+          senderRole: profile.role,
+          body: cleanBody,
+          createdAt,
+        };
+        setDemoConversations((current) => [conversation, ...current]);
+        setDemoMessages((current) => [...current, message]);
+        setSupportRevision((revision) => revision + 1);
+        return id;
+      }
+
+      const { data, error } = await assertBackend().rpc('create_support_conversation', {
+        p_subject: cleanSubject,
+        p_body: cleanBody,
+        p_related_order_id: relatedOrderId ?? null,
+      });
+      if (error) throw error;
+      if (typeof data !== 'string') throw new Error('لم يرجع الخادم رقم المحادثة.');
+      setSupportRevision((revision) => revision + 1);
+      return data;
+    },
+    [isDemo, orders, profile],
+  );
+
+  const sendSupportMessage = useCallback(
+    async (conversationId: string, body: string) => {
+      if (!profile) throw new Error('سجّل الدخول لإرسال الرسالة.');
+      const cleanBody = body.trim();
+      if (!cleanBody || cleanBody.length > 4000) {
+        throw new Error('اكتب رسالة من 1 إلى 4000 حرف.');
+      }
+      if (isDemo) {
+        const conversation = demoConversations.find((item) => item.id === conversationId);
+        if (
+          !conversation ||
+          (profile.role !== 'admin' &&
+            profile.role !== 'support' &&
+            conversation.openedBy !== profile.id)
+        ) {
+          throw new Error('هذه المحادثة غير متاحة لهذا الحساب.');
+        }
+        const createdAt = new Date().toISOString();
+        const message: SupportMessage = {
+          id: Date.now(),
+          conversationId,
+          senderId: profile.id,
+          senderName: profile.name,
+          senderRole: profile.role,
+          body: cleanBody,
+          createdAt,
+        };
+        setDemoMessages((current) => [...current, message]);
+        setDemoConversations((current) =>
+          current.map((item) =>
+            item.id === conversationId
+              ? {
+                  ...item,
+                  lastMessageBody: cleanBody.slice(0, 300),
+                  lastMessageAt: createdAt,
+                  status:
+                    item.status === 'resolved' &&
+                    (profile.role === 'courier' || profile.role === 'restaurant')
+                      ? 'open'
+                      : item.status,
+                  assignedTo:
+                    item.status === 'resolved' &&
+                    (profile.role === 'courier' || profile.role === 'restaurant')
+                      ? undefined
+                      : item.assignedTo,
+                  assignedName:
+                    item.status === 'resolved' &&
+                    (profile.role === 'courier' || profile.role === 'restaurant')
+                      ? undefined
+                      : item.assignedName,
+                }
+              : item,
+          ),
+        );
+        setSupportRevision((revision) => revision + 1);
+        return;
+      }
+
+      const { error } = await assertBackend().from('support_messages').insert({
+        conversation_id: conversationId,
+        body: cleanBody,
+      });
+      if (error) throw error;
+      setSupportRevision((revision) => revision + 1);
+    },
+    [demoConversations, isDemo, profile],
+  );
+
+  const claimSupportConversation = useCallback(
+    async (conversationId: string) => {
+      if (!profile || !['admin', 'support'].includes(profile.role)) {
+        throw new Error('استلام المحادثات متاح لفريق الدعم فقط.');
+      }
+      if (isDemo) {
+        const conversation = demoConversations.find((item) => item.id === conversationId);
+        if (!conversation || conversation.status === 'resolved') {
+          throw new Error('المحادثة غير متاحة للاستلام.');
+        }
+        if (conversation.assignedTo && conversation.assignedTo !== profile.id && profile.role !== 'admin') {
+          throw new Error('استلم موظف آخر هذه المحادثة بالفعل.');
+        }
+        setDemoConversations((current) =>
+          current.map((item) =>
+            item.id === conversationId
+              ? {
+                  ...item,
+                  assignedTo: profile.id,
+                  assignedName: profile.name,
+                  status: item.status === 'open' ? 'in_progress' : item.status,
+                }
+              : item,
+          ),
+        );
+        setSupportRevision((revision) => revision + 1);
+        return;
+      }
+
+      const { error } = await assertBackend().rpc('claim_support_conversation', {
+        p_conversation_id: conversationId,
+      });
+      if (error) throw error;
+      setSupportRevision((revision) => revision + 1);
+    },
+    [demoConversations, isDemo, profile],
+  );
+
+  const setSupportConversationStatus = useCallback(
+    async (conversationId: string, status: SupportConversationStatus) => {
+      if (!profile || !['admin', 'support'].includes(profile.role)) {
+        throw new Error('تغيير حالة المحادثة متاح لفريق الدعم فقط.');
+      }
+      if (isDemo) {
+        const conversation = demoConversations.find((item) => item.id === conversationId);
+        if (!conversation) throw new Error('المحادثة غير موجودة.');
+        if (conversation.assignedTo && conversation.assignedTo !== profile.id && profile.role !== 'admin') {
+          throw new Error('المحادثة مستلمة بواسطة موظف آخر.');
+        }
+        setDemoConversations((current) =>
+          current.map((item) =>
+            item.id === conversationId ? { ...item, status } : item,
+          ),
+        );
+        setSupportRevision((revision) => revision + 1);
+        return;
+      }
+
+      const { error } = await assertBackend().rpc('set_support_conversation_status', {
+        p_conversation_id: conversationId,
+        p_status: status,
+      });
+      if (error) throw error;
+      setSupportRevision((revision) => revision + 1);
+    },
+    [demoConversations, isDemo, profile],
+  );
+
+  const createSupportAgent = useCallback(
+    async (input: NewSupportAgentInput) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إنشاء حسابات الدعم متاح للإدارة فقط.');
+      }
+      if (isDemo) {
+        throw new Error('المعاينة لا تنشئ حسابات حقيقية.');
+      }
+      const fullName = input.fullName.trim();
+      const email = input.email.trim();
+      const phone = input.phone.trim();
+      if (!fullName || !email || !/^[+\d][\d\s-]{7,16}$/.test(phone)) {
+        throw new Error('راجع الاسم والبريد الإلكتروني ورقم الهاتف.');
+      }
+
+      const { data, error } = await assertBackend().functions.invoke('admin-create-account', {
+        body: { role: 'support', email, fullName, phone },
+      });
+      if (error) {
+        if (error.context instanceof Response) {
+          const response = await error.context.json().catch(() => null);
+          if (typeof response?.error === 'string') throw new Error(response.error);
+        }
+        throw error;
+      }
+      if (!data?.code || !data?.temporaryPassword || !data?.email) {
+        throw new Error('لم يرجع الخادم بيانات الحساب المؤقتة.');
+      }
+      return {
+        code: data.code as string,
+        email: data.email as string,
+        temporaryPassword: data.temporaryPassword as string,
+      };
+    },
+    [isDemo, profile],
   );
 
   const acceptOrder = useCallback(
@@ -720,6 +1156,15 @@ export function AppProvider({ children }: PropsWithChildren) {
       couriers,
       restaurants,
       locations,
+      supportRevision,
+      loadSupportConversations,
+      loadSupportMessages,
+      listSupportAgents,
+      createSupportConversation,
+      sendSupportMessage,
+      claimSupportConversation,
+      setSupportConversationStatus,
+      createSupportAgent,
       signIn,
       signInDemo,
       signOut,
@@ -732,6 +1177,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       advanceOrder,
       recordCash,
       setShift,
+      setCourierActive,
       getCourierContact,
       setRestaurantLocation,
     }),
@@ -743,6 +1189,15 @@ export function AppProvider({ children }: PropsWithChildren) {
       couriers,
       restaurants,
       locations,
+      supportRevision,
+      loadSupportConversations,
+      loadSupportMessages,
+      listSupportAgents,
+      createSupportConversation,
+      sendSupportMessage,
+      claimSupportConversation,
+      setSupportConversationStatus,
+      createSupportAgent,
       signIn,
       signInDemo,
       signOut,
@@ -755,6 +1210,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       advanceOrder,
       recordCash,
       setShift,
+      setCourierActive,
       getCourierContact,
       setRestaurantLocation,
     ],

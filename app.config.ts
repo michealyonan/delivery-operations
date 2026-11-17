@@ -37,6 +37,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: 'portrait',
     userInterfaceStyle: 'light',
     platforms: ['android', 'web'],
+    web: {
+      ...config.web,
+      output: 'single',
+    },
+    experiments: {
+      ...config.experiments,
+      baseUrl: process.env.APP_BASE_PATH ?? '',
+    },
     android: {
       ...config.android,
       package: 'com.deliveryapp.operations',

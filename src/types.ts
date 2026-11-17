@@ -1,4 +1,6 @@
-export type UserRole = 'admin' | 'restaurant' | 'courier';
+export type UserRole = 'admin' | 'restaurant' | 'courier' | 'support';
+
+export type SupportConversationStatus = 'open' | 'in_progress' | 'resolved';
 
 export type OrderStatus =
   | 'pending'
@@ -39,6 +41,7 @@ export interface Courier {
   nationalId?: string;
   address?: string;
   idCardPath?: string;
+  isActive: boolean;
   isOnShift: boolean;
   location?: CourierLocation;
 }
@@ -114,4 +117,43 @@ export interface TemporaryCredentials {
   code: string;
   email: string;
   temporaryPassword: string;
+}
+
+export interface SupportConversation {
+  id: string;
+  openedBy: string;
+  requesterRole: 'restaurant' | 'courier';
+  requesterName: string;
+  subject: string;
+  relatedOrderId?: string;
+  relatedOrderCode?: string;
+  status: SupportConversationStatus;
+  assignedTo?: string;
+  assignedName?: string;
+  lastMessageBody: string;
+  lastMessageAt: string;
+  createdAt: string;
+}
+
+export interface SupportMessage {
+  id: number;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: UserRole;
+  body: string;
+  createdAt: string;
+}
+
+export interface SupportAgent {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
+export interface NewSupportAgentInput {
+  email: string;
+  fullName: string;
+  phone: string;
 }

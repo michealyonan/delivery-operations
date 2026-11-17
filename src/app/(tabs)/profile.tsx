@@ -26,7 +26,16 @@ export default function ProfileScreen() {
       <Heading>حسابي</Heading>
       <Section title="بيانات الحساب">
         <Body>{profile?.name}</Body>
-        <Body>الدور: {profile?.role === 'admin' ? 'إدارة' : profile?.role === 'restaurant' ? 'مطعم' : 'مندوب'}</Body>
+        <Body>
+          الدور:{' '}
+          {profile?.role === 'admin'
+            ? 'إدارة'
+            : profile?.role === 'restaurant'
+              ? 'مطعم'
+              : profile?.role === 'support'
+                ? 'دعم فني'
+                : 'مندوب'}
+        </Body>
         {profile?.email ? <Body>{profile.email}</Body> : null}
         {profile?.phone ? <Body>{profile.phone}</Body> : null}
         {profile?.courierCode ? <Body>رقم المندوب: {profile.courierCode}</Body> : null}

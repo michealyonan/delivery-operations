@@ -150,6 +150,9 @@ function AdminHome() {
       <ActionButton onPress={() => router.push('/(tabs)/reports')} tone="outline">
         فتح التقارير
       </ActionButton>
+      <ActionButton onPress={() => router.push('/(tabs)/support')} tone="outline">
+        صندوق الدعم الفني
+      </ActionButton>
     </Page>
   );
 }

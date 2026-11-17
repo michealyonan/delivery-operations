@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { useState } from 'react';
-import { Alert, Image, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../components/ui';
 import { isBackendConfigured } from '../../lib/supabase';
@@ -10,7 +10,7 @@ import { colors, spacing } from '../../theme';
 import type { TemporaryCredentials } from '../../types';
 
 export default function CouriersScreen() {
-  const { couriers, createCourier, isDemo, refresh } = useApp();
+  const { couriers, createCourier, isDemo, refresh, setCourierActive } = useApp();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -19,6 +19,35 @@ export default function CouriersScreen() {
   const [card, setCard] = useState<ImagePickerAsset | null>(null);
   const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
   const [busy, setBusy] = useState(false);
+  const [busyCourierId, setBusyCourierId] = useState<number | null>(null);
+
+  const toggleCourier = (courierId: number, isActive: boolean) => {
+    const nextActive = !isActive;
+    const title = nextActive ? 'إعادة تفعيل الحساب' : 'إيقاف حساب المندوب';
+    const message = nextActive
+      ? 'سيتمكن المندوب من تسجيل الدخول مجددًا، لكنه يحتاج إلى بدء الشيفت بنفسه.'
+      : 'سيُمنع المندوب من تسجيل الدخول وسيتوقف الشيفت. انقل أو أكمل طلباته غير المنتهية أولًا.';
+    const run = async () => {
+      setBusyCourierId(courierId);
+      try {
+        await setCourierActive(courierId, nextActive);
+      } catch (error) {
+        Alert.alert(title, error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      } finally {
+        setBusyCourierId(null);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) void run();
+      return;
+    }
+
+    Alert.alert(title, message, [
+      { text: 'إلغاء', style: 'cancel' },
+      { text: nextActive ? 'إعادة التفعيل' : 'إيقاف الحساب', style: 'destructive', onPress: () => void run() },
+    ]);
+  };
 
   const pickIdCard = async () => {
     const ImagePicker = await import('expo-image-picker');
@@ -97,7 +126,17 @@ export default function CouriersScreen() {
             <View key={courier.id} style={styles.listRow}>
               <Text style={styles.code}>{courier.code}</Text>
               <Text style={styles.name}>{courier.fullName}</Text>
-              <Text style={styles.detail}>{courier.phone} · {courier.isOnShift ? 'على الشيفت' : 'غير متصل'}</Text>
+              <Text style={styles.detail}>
+                {courier.phone} · {!courier.isActive ? 'الحساب موقوف' : courier.isOnShift ? 'على الشيفت' : 'غير متصل'}
+              </Text>
+              <ActionButton
+                disabled={busyCourierId !== null}
+                loading={busyCourierId === courier.id}
+                onPress={() => toggleCourier(courier.id, courier.isActive)}
+                tone={courier.isActive ? 'danger' : 'outline'}
+              >
+                {courier.isActive ? 'إيقاف الحساب' : 'إعادة تفعيل الحساب'}
+              </ActionButton>
             </View>
           ))}
         </Section>
@@ -138,7 +177,17 @@ export default function CouriersScreen() {
           <View key={courier.id} style={styles.listRow}>
             <Text style={styles.code}>{courier.code}</Text>
             <Text style={styles.name}>{courier.fullName}</Text>
-            <Text style={styles.detail}>{courier.phone} · {courier.isOnShift ? 'على الشيفت' : 'غير متصل'}</Text>
+            <Text style={styles.detail}>
+              {courier.phone} · {!courier.isActive ? 'الحساب موقوف' : courier.isOnShift ? 'على الشيفت' : 'غير متصل'}
+            </Text>
+            <ActionButton
+              disabled={busyCourierId !== null}
+              loading={busyCourierId === courier.id}
+              onPress={() => toggleCourier(courier.id, courier.isActive)}
+              tone={courier.isActive ? 'danger' : 'outline'}
+            >
+              {courier.isActive ? 'إيقاف الحساب' : 'إعادة تفعيل الحساب'}
+            </ActionButton>
           </View>
         ))}
       </Section>

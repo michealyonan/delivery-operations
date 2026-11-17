@@ -156,22 +156,38 @@ export default function OrderDetailScreen() {
         <Notice>ستظهر بيانات المندوب بعد قبوله الطلب.</Notice>
       )}
 
-      {profile?.role === 'admin' && order.status === 'pending' && (
-        <Section title="إسناد للمندوب">
-          {couriers.filter((item) => item.isOnShift).length === 0 ? (
-            <Notice tone="warning">لا يوجد مندوب على الشيفت.</Notice>
+      {profile?.role === 'admin' &&
+        ['pending', 'assigned', 'accepted', 'picked_up'].includes(order.status) && (
+        <Section title={order.courierId ? 'تحويل الطلب لمندوب آخر' : 'إسناد لمندوب'}>
+          {order.courierId ? (
+            <Body>
+              المندوب الحالي: {couriers.find((item) => item.id === order.courierId)?.fullName ?? 'مندوب'}
+            </Body>
+          ) : null}
+          {order.status === 'picked_up' ? (
+            <Notice tone="warning">
+              بعد التحويل، يؤكد المندوب الجديد استلام الطلب من المندوب السابق قبل إكمال التوصيل.
+            </Notice>
+          ) : null}
+          {couriers.filter((item) => item.isActive && item.isOnShift && item.id !== order.courierId).length === 0 ? (
+            <Notice tone="warning">لا يوجد مندوب آخر نشط وعلى الشيفت.</Notice>
           ) : (
             couriers
-              .filter((item) => item.isOnShift)
+              .filter((item) => item.isActive && item.isOnShift && item.id !== order.courierId)
               .map((courier) => (
                 <ActionButton
                   key={courier.id}
                   disabled={busy}
                   loading={busy}
-                  onPress={() => run(() => assignOrder(order.id, courier.id), `أُسند إلى ${courier.fullName}.`)}
+                  onPress={() =>
+                    run(
+                      () => assignOrder(order.id, courier.id),
+                      `تم تحويل الطلب إلى ${courier.fullName}. سيؤكد المندوب الجديد استلامه قبل إكمال التوصيل.`,
+                    )
+                  }
                   tone="outline"
                 >
-                  {courier.fullName} · {courier.code}
+                  {order.courierId ? 'تحويل إلى' : 'إسناد إلى'} {courier.fullName} · {courier.code}
                 </ActionButton>
               ))
           )}
@@ -191,9 +207,9 @@ export default function OrderDetailScreen() {
         <ActionButton
           disabled={busy}
           loading={busy}
-          onPress={() => run(() => advanceOrder(order.id, 'picked_up'), 'تم تسجيل استلام الطلب من المطعم.')}
+          onPress={() => run(() => advanceOrder(order.id, 'picked_up'), 'تم تسجيل استلام الطلب وبدء التوصيل.')}
         >
-          استلمت الطلب من المطعم
+          استلمت الطلب وأبدأ التوصيل
         </ActionButton>
       )}
       {profile?.role === 'courier' && order.status === 'picked_up' && (

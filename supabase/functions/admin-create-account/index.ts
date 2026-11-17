@@ -64,10 +64,16 @@ Deno.serve(async (request) => {
   const fullName = typeof payload.fullName === 'string' ? payload.fullName.trim() : '';
   const phone = typeof payload.phone === 'string' ? payload.phone.trim() : '';
   const address = typeof payload.address === 'string' ? payload.address.trim() : '';
-  if (role !== 'courier' && role !== 'restaurant') {
+  if (role !== 'courier' && role !== 'restaurant' && role !== 'support') {
     return respond({ error: 'نوع الحساب غير مدعوم.' }, 400);
   }
-  if (!email || !email.includes('@') || !fullName || !address || !/^[+\d][\d\s-]{7,16}$/.test(phone)) {
+  if (
+    !email ||
+    !email.includes('@') ||
+    !fullName ||
+    (role !== 'support' && !address) ||
+    !/^[+\d][\d\s-]{7,16}$/.test(phone)
+  ) {
     return respond({ error: 'راجع البريد والاسم والعنوان ورقم التليفون.' }, 400);
   }
 
@@ -145,7 +151,7 @@ Deno.serve(async (request) => {
         accountError = 'تعذر حفظ بيانات المندوب الخاصة.';
       }
     }
-  } else {
+  } else if (role === 'restaurant') {
     const restaurantInsert = await serviceClient
       .from('restaurants')
       .insert({
@@ -162,6 +168,8 @@ Deno.serve(async (request) => {
     } else {
       accountCode = restaurantInsert.data.restaurant_code;
     }
+  } else {
+    accountCode = `SUP-${created.user.id.slice(0, 8).toUpperCase()}`;
   }
 
   if (accountError) {

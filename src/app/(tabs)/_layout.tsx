@@ -9,6 +9,7 @@ export default function TabLayout() {
   if (!profile) return <Redirect href="/login" />;
 
   const admin = profile.role === 'admin';
+  const supportOnly = profile.role === 'support';
 
   return (
     <Tabs
@@ -30,6 +31,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'الرئيسية',
+          href: supportOnly ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="view-dashboard-outline" color={String(color)} size={size} />
           ),
@@ -39,8 +41,18 @@ export default function TabLayout() {
         name="orders"
         options={{
           title: 'الطلبات',
+          href: supportOnly ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="clipboard-list-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="support"
+        options={{
+          title: 'الدعم',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="message-text-outline" color={String(color)} size={size} />
           ),
         }}
       />
@@ -68,7 +80,7 @@ export default function TabLayout() {
         name="reports"
         options={{
           title: 'التقارير',
-          href: admin ? undefined : null,
+          href: null,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="chart-box-outline" color={String(color)} size={size} />
           ),

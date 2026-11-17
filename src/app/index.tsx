@@ -13,5 +13,8 @@ export default function IndexRoute() {
       </View>
     );
   }
+  if (profile?.role === 'support') {
+    return <Redirect href="/(tabs)/support" />;
+  }
   return <Redirect href={profile ? '/(tabs)' : '/login'} />;
 }

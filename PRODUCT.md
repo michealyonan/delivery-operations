@@ -11,11 +11,12 @@ android
 - Delivery managers dispatch orders, monitor couriers, and review order and cash totals.
 - Each restaurant has a separate account; its staff enter orders and follow their dispatch and delivery status.
 - Couriers receive assigned orders, update delivery status, and record cash handled per order.
+- Support staff respond to courier and restaurant questions in the shared support inbox.
 - Managers create courier accounts and maintain their identity records.
 
 ## Product Purpose
 
-Provide one Arabic-language Android app that connects restaurant order entry, manual management dispatch, courier delivery, and per-order cash reporting.
+Provide one Arabic-language app that connects restaurant order entry, manual management dispatch, courier delivery, location visibility, per-order cash reporting, and operational support conversations.
 
 ## Positioning
 
@@ -36,6 +37,8 @@ The app is intended for delivery operations in Egypt and uses Arabic with right-
 - Managers create courier accounts with a full legal name, national ID number, address, and ID-card image. Each courier receives a permanent, generated identifier distinct from the national ID.
 - Courier accounts also require a phone number for restaurant contact. The login email and temporary password are separate from that phone number.
 - Managers create separate restaurant accounts so orders remain associated with the restaurant that submitted them.
+- Couriers and restaurants can open support conversations, optionally link one of their own orders, and continue the exchange in the same thread. Management creates support staff accounts; support staff can claim and resolve conversations.
+- Support conversations update in real time while connected. The first release supports text messages and conversation status, not file attachments or offline delivery.
 - After a courier accepts an order, only the restaurant account that submitted that order can see that courier's name and phone number.
 - Courier identity details and ID-card images are sensitive personal information and must be restricted to management; they must not be exposed in logs or public storage.
 - Initial login is assumed to use a required email address and a temporary password generated for the courier. SMS login and account recovery remain open decisions.
