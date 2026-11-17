@@ -21,6 +21,7 @@ import {
   demoSupportConversations,
   demoSupportMessages,
 } from '../lib/demo-data';
+import { errorMessage } from '../lib/error-message';
 import { isBackendConfigured, supabase } from '../lib/supabase';
 import type {
   AppProfile,
@@ -1661,7 +1662,7 @@ export function AppProvider({ children }: PropsWithChildren) {
           });
           if (rollbackError) {
             throw new Error(
-              `تعذر بدء مشاركة الموقع (${String(locationError)}) كما تعذر إيقاف الشيفت على الخادم (${rollbackError.message}).`,
+              `تعذر بدء مشاركة الموقع (${errorMessage(locationError, 'حاول مرة أخرى.')}) كما تعذر إيقاف الشيفت على الخادم (${rollbackError.message}).`,
             );
           }
           throw locationError;

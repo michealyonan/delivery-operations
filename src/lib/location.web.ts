@@ -1,4 +1,5 @@
 import { isBackendConfigured, supabase } from './supabase';
+import { errorMessage } from './error-message';
 
 let activeWatchId: number | null = null;
 let lastSentAt = 0;
@@ -102,7 +103,7 @@ export async function startShiftLocationUpdates(courierId: number) {
           if (!started) {
             failToStart(
               new Error(
-                `تعذر حفظ موقع المندوب على الخادم: ${error instanceof Error ? error.message : String(error)}`,
+                `تعذر حفظ موقع المندوب على الخادم: ${errorMessage(error, 'حاول مرة أخرى.')}`,
               ),
             );
           } else {
