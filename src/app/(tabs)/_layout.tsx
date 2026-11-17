@@ -8,7 +8,7 @@ import { useApp } from '../../state/app-context';
 import { colors } from '../../theme';
 
 export default function TabLayout() {
-  const { profile, couriers, orderAssignmentAttempts, orderReturns } = useApp();
+  const { profile, couriers, orderAssignmentAttempts, orderReturns, orderTransferRequests } = useApp();
   const insets = useSafeAreaInsets();
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
@@ -32,6 +32,9 @@ export default function TabLayout() {
     (attempt) =>
       (attempt.status === 'awaiting' || attempt.status === 'not_accepted') &&
       (admin || attempt.courierId === profile.courierId),
+  ).length;
+  const pendingTransferCount = orderTransferRequests.filter(
+    (request) => request.status === 'pending',
   ).length;
 
   return (
@@ -89,6 +92,19 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="transfers"
+        options={{
+          title: 'التحويلات',
+          href: admin || supportOnly ? undefined : null,
+          tabBarBadge: (admin || supportOnly) && pendingTransferCount > 0
+            ? pendingTransferCount
+            : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="swap-horizontal" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="payments"
         options={{
           title: 'الدفعات',
@@ -133,6 +149,10 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="restaurant-new-order"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="order-detail"
         options={{ href: null }}
       />
       <Tabs.Screen

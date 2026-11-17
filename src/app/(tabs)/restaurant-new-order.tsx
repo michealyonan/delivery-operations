@@ -15,35 +15,45 @@ export default function NewOrderScreen() {
     profile,
     createOrder,
     isDemo,
+    restaurants,
     restaurantMenuItems,
     loadRestaurantMenu,
   } = useApp();
+  const isAdmin = profile?.role === 'admin';
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState<number | null>(
+    profile?.restaurantId ?? null,
+  );
+  const selectedRestaurant = restaurants.find((restaurant) => restaurant.id === selectedRestaurantId);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
-  const [menuBusy, setMenuBusy] = useState(true);
+  const [loadedMenuRestaurantId, setLoadedMenuRestaurantId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const acceptsOrders = profile?.restaurantAcceptsOrders !== false;
+  const menuRestaurantId = isAdmin ? selectedRestaurantId : profile?.restaurantId ?? null;
+  const menuBusy = menuRestaurantId != null && loadedMenuRestaurantId !== menuRestaurantId;
 
   useEffect(() => {
+    if (menuRestaurantId == null) return;
     let active = true;
-    loadRestaurantMenu()
+    loadRestaurantMenu(menuRestaurantId)
+      .then(() => {
+        if (active) setLoadedMenuRestaurantId(menuRestaurantId);
+      })
       .catch((error: unknown) => {
         if (active) {
+          setLoadedMenuRestaurantId(menuRestaurantId);
           setErrorMessage(error instanceof Error ? error.message : 'تعذر تحميل قائمة الأصناف.');
         }
-      })
-      .finally(() => {
-        if (active) setMenuBusy(false);
       });
     return () => {
       active = false;
     };
-  }, [loadRestaurantMenu]);
+  }, [loadRestaurantMenu, menuRestaurantId]);
 
   const selectedItems = useMemo(
     () =>
@@ -63,10 +73,14 @@ export default function NewOrderScreen() {
     });
     setErrorMessage('');
     setSuccessMessage('');
-    if (!acceptsOrders) {
-      setErrorMessage('أوقفت الإدارة استقبال الطلبات الجديدة لهذا المطعم.');
-      return;
-    }
+  };
+
+  const selectRestaurant = (restaurantId: number) => {
+    setSelectedRestaurantId(restaurantId);
+    setLoadedMenuRestaurantId(null);
+    setQuantities({});
+    setErrorMessage('');
+    setSuccessMessage('');
   };
 
   const submit = async () => {
@@ -83,13 +97,18 @@ export default function NewOrderScreen() {
     setBusy(true);
     try {
       await createOrder({
+        restaurantId: isAdmin ? selectedRestaurantId ?? undefined : undefined,
         customerName: customerName.trim(),
         customerPhone: customerPhone.trim(),
         customerAddress: customerAddress.trim(),
         notes: notes.trim(),
         items: selectedItems,
       });
-      setSuccessMessage('تم إرسال الطلب للإدارة؛ ستحدد الإدارة رسوم التوصيل عند إسناده للمندوب.');
+      setSuccessMessage(
+        isAdmin
+          ? 'تم إنشاء الطلب باسم الإدارة. افتح قائمة الطلبات، أضف رسوم التوصيل، ثم أرسله للمندوب.'
+          : 'تم إرسال الطلب للإدارة؛ ستحدد الإدارة رسوم التوصيل عند إسناده للمندوب.',
+      );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'تعذر إرسال الطلب. تحقق من الاتصال وحاول مرة أخرى.');
     } finally {
@@ -99,18 +118,69 @@ export default function NewOrderScreen() {
 
   return (
     <Page>
-      <Heading>طلب جديد</Heading>
+      <Heading>{isAdmin ? 'إنشاء طلب باسم الإدارة' : 'طلب جديد'}</Heading>
       {isDemo && <Notice tone="warning">لن يصل هذا الطلب إلى أجهزة أخرى في وضع المعاينة.</Notice>}
+      {isAdmin ? (
+        <Notice tone="info">سيظهر الطلب للمطعم مع توضيح أن الإدارة هي التي أنشأته.</Notice>
+      ) : null}
+      {isAdmin ? (
+        <Section title="المطعم">
+          {restaurants.length === 0 ? (
+            <Notice tone="warning">لا توجد مطاعم مسجلة لإنشاء طلب لها.</Notice>
+          ) : (
+            <View style={styles.restaurantOptions}>
+              {restaurants.map((restaurant) => {
+                const selected = restaurant.id === selectedRestaurantId;
+                return (
+                  <Pressable
+                    key={restaurant.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => selectRestaurant(restaurant.id)}
+                    style={[styles.restaurantOption, selected && styles.restaurantOptionSelected]}
+                  >
+                    <Text
+                      style={[
+                        styles.restaurantOptionName,
+                        selected && styles.restaurantOptionNameSelected,
+                      ]}
+                    >
+                      {restaurant.name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.restaurantOptionCode,
+                        selected && styles.restaurantOptionNameSelected,
+                      ]}
+                    >
+                      {restaurant.code}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </Section>
+      ) : null}
       {!acceptsOrders ? (
         <Notice tone="warning">أوقفت الإدارة استقبال الطلبات الجديدة. يمكنك متابعة الطلبات السابقة وإدارة قائمة الأصناف.</Notice>
       ) : null}
-      <Body>اختر الأصناف والكميات. ستضيف الإدارة رسوم التوصيل لهذا الطلب عند إرساله للمندوب.</Body>
-      <ActionButton onPress={() => router.push('/restaurant-menu')} tone="outline">
-        إدارة أصناف المطعم وأسعارها
-      </ActionButton>
+      <Body>
+        {isAdmin
+          ? 'اختر أصناف المطعم والكميات، ثم أدخل بيانات العميل. سيظهر الطلب في قائمة الإدارة لتحديد رسوم التوصيل وإسناده للمندوب.'
+          : 'اختر الأصناف والكميات. ستضيف الإدارة رسوم التوصيل لهذا الطلب عند إرساله للمندوب.'}
+      </Body>
+      {!isAdmin ? (
+        <ActionButton onPress={() => router.push('/restaurant-menu')} tone="outline">
+          إدارة أصناف المطعم وأسعارها
+        </ActionButton>
+      ) : null}
 
       <Section title="الأصناف">
-        {menuBusy ? (
+        {isAdmin && selectedRestaurantId == null ? (
+          <Notice>اختر المطعم أولًا لعرض قائمته.</Notice>
+        ) : menuBusy ||
+          loadedMenuRestaurantId !== (isAdmin ? selectedRestaurantId : profile?.restaurantId ?? null) ? (
           <Notice>جارٍ تحميل القائمة...</Notice>
         ) : restaurantMenuItems.filter((item) => item.isAvailable).length === 0 ? (
           <Notice tone="warning">لا توجد أصناف متاحة. أضف الأصناف أو فعّل صنفًا من إدارة القائمة.</Notice>
@@ -183,16 +253,21 @@ export default function NewOrderScreen() {
         <>
           <Notice tone="info">{successMessage}</Notice>
           <ActionButton onPress={() => router.replace('/(tabs)/orders')} tone="outline">
-            فتح طلبات المطعم
+            {isAdmin ? 'فتح قائمة الطلبات للإسناد' : 'فتح طلبات المطعم'}
           </ActionButton>
         </>
       ) : null}
       <ActionButton
-        disabled={menuBusy || Boolean(successMessage) || !acceptsOrders}
+        disabled={
+          menuBusy ||
+          Boolean(successMessage) ||
+          !acceptsOrders ||
+          (isAdmin && (selectedRestaurantId == null || !selectedRestaurant))
+        }
         loading={busy}
         onPress={submit}
       >
-        {acceptsOrders ? 'إرسال للإدارة' : 'استقبال الطلبات متوقف'}
+        {isAdmin ? 'إنشاء الطلب باسم الإدارة' : acceptsOrders ? 'إرسال للإدارة' : 'استقبال الطلبات متوقف'}
       </ActionButton>
     </Page>
   );
@@ -225,4 +300,19 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
   quantity: { minWidth: 22, color: colors.text, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   total: { color: colors.primaryDark, fontSize: 16, fontWeight: '800', textAlign: 'right' },
+  restaurantOptions: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: spacing.sm },
+  restaurantOption: {
+    minWidth: 130,
+    flexGrow: 1,
+    gap: 4,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+  },
+  restaurantOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  restaurantOptionName: { color: colors.text, fontSize: 14, fontWeight: '700', textAlign: 'right' },
+  restaurantOptionCode: { color: colors.muted, fontSize: 12, textAlign: 'right' },
+  restaurantOptionNameSelected: { color: colors.white },
 });

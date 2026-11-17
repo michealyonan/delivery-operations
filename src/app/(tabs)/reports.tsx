@@ -40,6 +40,18 @@ export default function ReportsScreen() {
       count: courierOrders.length,
       collected: courierOrders.reduce((total, order) => total + (order.collectedPiasters ?? 0), 0),
       paid: courierOrders.reduce((total, order) => total + (order.paidToRestaurantPiasters ?? 0), 0),
+      paidToPreviousCourier: courierOrders.reduce(
+        (total, order) => total + (order.paidToPreviousCourierPiasters ?? 0),
+        0,
+      ),
+      receivedFromTransfers: delivered.reduce(
+        (total, order) =>
+          total +
+          (order.previousCourierId === courier.id
+            ? order.paidToPreviousCourierPiasters ?? 0
+            : 0),
+        0,
+      ),
     };
   });
 
@@ -89,12 +101,14 @@ export default function ReportsScreen() {
         <Metric value={String(delivered.length)} label="طلبات منجزة" />
         <Metric value={String(cancelled.length)} label="طلبات ملغاة" />
       </View>
-      {rows.map(({ courier, count, collected, paid }) => (
+      {rows.map(({ courier, count, collected, paid, paidToPreviousCourier, receivedFromTransfers }) => (
         <Section key={courier.id} title={`${courier.fullName} · ${courier.code}`}>
           <View style={styles.row}>
             <Body>طلبات منجزة: {count}</Body>
             <Body>مقبوض من العملاء: {money(collected)}</Body>
             <Body>مدفوع للمطاعم: {money(paid)}</Body>
+            <Body>مدفوع لمندوب سابق: {money(paidToPreviousCourier)}</Body>
+            <Body>مستلم من تحويلات: {money(receivedFromTransfers)}</Body>
           </View>
         </Section>
       ))}

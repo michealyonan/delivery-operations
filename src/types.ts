@@ -12,6 +12,14 @@ export type OrderStatus =
   | 'picked_up'
   | 'delivered'
   | 'cancelled';
+export type OrderTransferReason =
+  | 'vehicle_issue'
+  | 'health_issue'
+  | 'restaurant_delay'
+  | 'customer_unavailable'
+  | 'order_issue'
+  | 'other';
+export type OrderTransferStatus = 'pending' | 'approved' | 'rejected';
 
 export interface AppProfile {
   id: string;
@@ -92,6 +100,7 @@ export interface Restaurant {
 export interface DeliveryOrder {
   id: string;
   code: string;
+  orderSource: 'restaurant' | 'admin';
   restaurantId: number;
   restaurantName: string;
   restaurantAddress: string;
@@ -112,6 +121,8 @@ export interface DeliveryOrder {
   lineItems?: OrderLineItem[];
   collectedPiasters?: number;
   paidToRestaurantPiasters?: number;
+  paidToPreviousCourierPiasters?: number;
+  previousCourierId?: number;
   status: OrderStatus;
   createdAt: string;
   assignedAt?: string;
@@ -146,6 +157,24 @@ export interface OrderAssignmentAttempt {
   resolvedAt?: string;
 }
 
+export interface OrderTransferRequest {
+  id: string;
+  orderId: string;
+  fromCourierId: number;
+  fromCourierName: string;
+  fromCourierCode: string;
+  fromCourierPhone: string;
+  toCourierId?: number;
+  toCourierName?: string;
+  toCourierCode?: string;
+  reason: OrderTransferReason;
+  reasonDetails: string;
+  status: OrderTransferStatus;
+  requiresHandoff: boolean;
+  requestedAt: string;
+  resolvedAt?: string;
+}
+
 export interface OrderLineItem {
   id: number;
   menuItemId?: number;
@@ -163,6 +192,7 @@ export interface RestaurantMenuItem {
 }
 
 export interface NewOrderInput {
+  restaurantId?: number;
   customerName: string;
   customerPhone: string;
   customerAddress: string;

@@ -16,6 +16,7 @@ export const demoOrders: DeliveryOrder[] = [
   {
     id: 'demo-order-1001',
     code: 'DEMO-1001',
+    orderSource: 'restaurant',
     restaurantId: 1,
     restaurantName: 'مطعم تجريبي',
     restaurantAddress: 'عنوان المطعم التجريبي',
@@ -41,6 +42,7 @@ export const demoOrders: DeliveryOrder[] = [
   {
     id: 'demo-order-1002',
     code: 'DEMO-1002',
+    orderSource: 'restaurant',
     restaurantId: 1,
     restaurantName: 'مطعم تجريبي',
     restaurantAddress: 'عنوان المطعم التجريبي',
@@ -64,6 +66,7 @@ export const demoOrders: DeliveryOrder[] = [
   {
     id: 'demo-order-1003',
     code: 'DEMO-1003',
+    orderSource: 'restaurant',
     restaurantId: 2,
     restaurantName: 'مطبخ تجريبي آخر',
     restaurantAddress: 'عنوان توضيحي آخر',

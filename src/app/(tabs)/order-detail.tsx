@@ -2,13 +2,15 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import type { ImagePickerAsset } from 'expo-image-picker';
-import { Alert, Image, Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../components/ui';
-import { useApp, parsePiasters } from '../state/app-context';
-import { colors, spacing } from '../theme';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
+import { orderTransferReasonOptions } from '../../lib/order-transfer';
+import { useApp, parsePiasters } from '../../state/app-context';
+import { colors, spacing } from '../../theme';
+import type { OrderTransferReason } from '../../types';
 
-const CourierMap = lazy(() => import('../components/courier-map'));
+const CourierMap = lazy(() => import('../../components/courier-map'));
 const googleMapsKeyConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY);
 
 function money(piasters: number | undefined) {
@@ -35,6 +37,7 @@ export default function OrderDetailScreen() {
     orders,
     orderAssignmentAttempts,
     orderReturns,
+    orderTransferRequests,
     couriers,
     locations,
     isDemo,
@@ -46,6 +49,7 @@ export default function OrderDetailScreen() {
     startOrderReturn,
     completeOrderReturn,
     confirmOrderReturn,
+    requestOrderTransfer,
   } = useApp();
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
   const orderReturn = orderReturns.find((item) => item.orderId === id);
@@ -67,6 +71,16 @@ export default function OrderDetailScreen() {
     order?.courierId == null
       ? undefined
       : couriers.find((courier) => courier.id === order.courierId);
+  const pendingTransferRequest = orderTransferRequests.find(
+    (request) => request.orderId === id && request.status === 'pending',
+  );
+  const approvedHandoff = orderTransferRequests.find(
+    (request) =>
+      request.orderId === id &&
+      request.status === 'approved' &&
+      request.toCourierId === profile?.courierId &&
+      request.requiresHandoff,
+  );
   const [contactResult, setContactResult] = useState<{
     orderId: string;
     contact: { name: string; phone: string } | null;
@@ -78,6 +92,8 @@ export default function OrderDetailScreen() {
   const [clock, setClock] = useState(0);
   const [returnPhoto, setReturnPhoto] = useState<ImagePickerAsset | null>(null);
   const [returnRefundReceived, setReturnRefundReceived] = useState<boolean | null>(null);
+  const [selectedTransferReason, setSelectedTransferReason] = useState<OrderTransferReason | null>(null);
+  const [transferDetails, setTransferDetails] = useState('');
   const deliveryFeeInput = order
     ? deliveryFeeDrafts[order.id] ??
       (order.deliveryFeePiasters == null ? '' : (order.deliveryFeePiasters / 100).toFixed(2))
@@ -162,12 +178,7 @@ export default function OrderDetailScreen() {
     let feePiasters: number | undefined;
     if (order.status === 'pending') {
       try {
-        feePiasters = deliveryFeeInput.trim()
-          ? parsePiasters(deliveryFeeInput)
-          : order.deliveryFeePiasters;
-        if (feePiasters == null) {
-          throw new Error('أدخل رسوم التوصيل لهذا الطلب قبل إرساله.');
-        }
+        feePiasters = parsePiasters(deliveryFeeInput);
       } catch (error) {
         Alert.alert('رسوم غير صحيحة', error instanceof Error ? error.message : 'راجع المبلغ.');
         return;
@@ -183,8 +194,16 @@ export default function OrderDetailScreen() {
   const deliverOrder = () =>
     run(async () => {
       await advanceOrder(order.id, 'delivered');
-      router.replace('/(tabs)/orders');
+      router.replace({ pathname: '/(tabs)/orders', params: { showHistory: 'true' } });
     }, 'تم تسجيل توصيل الطلب.');
+  const submitTransferRequest = () => {
+    if (!selectedTransferReason) return;
+    void run(async () => {
+      await requestOrderTransfer(order.id, selectedTransferReason, transferDetails);
+      setSelectedTransferReason(null);
+      setTransferDetails('');
+    }, 'تم إرسال طلب التحويل للإدارة والدعم للمراجعة.');
+  };
   const requestCancelOrder = () => {
     const title = 'إلغاء الطلب';
     const message = 'سيتم إلغاء الطلب وإبلاغ المطعم من خلال تحديث حالته. لا يمكن التراجع عن الإلغاء.';
@@ -250,6 +269,7 @@ export default function OrderDetailScreen() {
       await completeOrderReturn(orderReturn.id, returnPhoto, returnRefundReceived);
       setReturnPhoto(null);
       setReturnRefundReceived(null);
+      router.replace({ pathname: '/(tabs)/orders', params: { showHistory: 'true' } });
     }, 'تم تسجيل وصول الطلب للمطعم وإرسال العملية لتأكيد المطعم.');
   };
   const feePreviewPiasters = (() => {
@@ -268,15 +288,15 @@ export default function OrderDetailScreen() {
 
   return (
     <Page>
-      <ActionButton onPress={() => router.replace('/(tabs)/orders')} tone="outline">
-        رجوع للخلف
-      </ActionButton>
       <Heading>تفاصيل الطلب</Heading>
       {isDemo && <Notice tone="warning">بيانات توضيحية فقط.</Notice>}
       <View style={styles.titleRow}>
         <Subheading>{order.code}</Subheading>
         <StatusTag status={order.status} />
       </View>
+      {profile?.role === 'restaurant' && order.orderSource === 'admin' ? (
+        <Notice tone="info">أنشأت الإدارة هذا الطلب نيابةً عن المطعم.</Notice>
+      ) : null}
       {profile?.role === 'courier' && courierDidNotAccept ? (
         <Notice tone="warning">
           لم تقبل الطلب خلال المهلة المحددة؛ عاد للإدارة لإعادة إسناده. يظهر هنا ضمن سجل الطلبات غير المقبولة.
@@ -380,7 +400,7 @@ export default function OrderDetailScreen() {
             إذا رفض العميل الطلب بعد وصولك، ابدأ رحلة الإرجاع وأعده للمطعم بدل تسجيله كطلب تم توصيله.
           </Notice>
           <ActionButton
-            disabled={busy}
+            disabled={busy || pendingTransferRequest != null}
             loading={busy}
             onPress={requestOrderReturn}
             tone="danger"
@@ -513,6 +533,9 @@ export default function OrderDetailScreen() {
                 onChangeText={updateDeliveryFeeInput}
                 value={deliveryFeeInput}
               />
+              {!deliveryFeeInput.trim() ? (
+                <Notice tone="warning">أدخل رسوم التوصيل قبل إرسال الطلب لأي مندوب.</Notice>
+              ) : null}
               {feePreviewPiasters != null ? (
                 <Body>إجمالي العميل بعد الإسناد: {money(order.restaurantDuePiasters + feePreviewPiasters)}</Body>
               ) : null}
@@ -602,7 +625,11 @@ export default function OrderDetailScreen() {
                             : 'لا يوجد موقع مسجل'}
                         </Body>
                         <ActionButton
-                          disabled={busy || !isAvailable}
+                          disabled={
+                            busy ||
+                            !isAvailable ||
+                            (order.status === 'pending' && !deliveryFeeInput.trim())
+                          }
                           loading={busy}
                           onPress={() => assignToCourier(courier.id)}
                         >
@@ -622,6 +649,64 @@ export default function OrderDetailScreen() {
         </Section>
       )}
 
+      {profile?.role === 'courier' &&
+      order.courierId === profile.courierId &&
+      ['accepted', 'picked_up'].includes(order.status) ? (
+        <Section title="طلب تحويل الطلب">
+          {pendingTransferRequest ? (
+            <Notice tone="warning">
+              طلب التحويل بانتظار موافقة الإدارة أو الدعم. أوقف خطوات الطلب حتى يصلك القرار.
+            </Notice>
+          ) : (
+            <>
+              <Body>اختر سبب التحويل. إذا كان الطلب معك، سيُسند بعد الموافقة لأقرب مندوب متاح ويتسلم منك الطلب.</Body>
+              <View style={styles.transferReasons}>
+                {orderTransferReasonOptions.map((option) => (
+                  <Pressable
+                    key={option.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selectedTransferReason === option.id }}
+                    onPress={() => setSelectedTransferReason(option.id)}
+                    style={[
+                      styles.transferReason,
+                      selectedTransferReason === option.id && styles.transferReasonSelected,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.transferReasonText,
+                        selectedTransferReason === option.id && styles.transferReasonTextSelected,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Field
+                label={selectedTransferReason === 'other' ? 'اكتب السبب · مطلوب' : 'تفاصيل إضافية · اختياري'}
+                maxLength={500}
+                multiline
+                onChangeText={setTransferDetails}
+                value={transferDetails}
+              />
+              <ActionButton
+                disabled={
+                  busy ||
+                  selectedTransferReason == null ||
+                  (selectedTransferReason === 'other' && !transferDetails.trim())
+                }
+                loading={busy}
+                onPress={submitTransferRequest}
+                tone="outline"
+              >
+                إرسال طلب التحويل للإدارة والدعم
+              </ActionButton>
+            </>
+          )}
+        </Section>
+      ) : null}
+
       {profile?.role === 'courier' && order.status === 'assigned' && (
         <ActionButton
           disabled={busy}
@@ -631,36 +716,65 @@ export default function OrderDetailScreen() {
           قبول واستلام الطلب
         </ActionButton>
       )}
-      {profile?.role === 'courier' && order.status === 'accepted' && (
-        <>
-          <Notice tone="info">عند استلام الطلب من المطعم، ادفع للمطعم: {money(order.restaurantDuePiasters)}</Notice>
-          <ActionButton
-            disabled={busy}
-            loading={busy}
-            onPress={() => run(() => advanceOrder(order.id, 'picked_up'), 'تم تسجيل استلام الطلب وبدء التوصيل.')}
-          >
-            استلمت الطلب وأبدأ التوصيل
-          </ActionButton>
-        </>
-      )}
-      {profile?.role === 'courier' && order.status === 'picked_up' && (
-        <>
-          <Notice tone="info">عند تسليم الطلب للعميل، حصّل منه: {money(order.amountDuePiasters)}</Notice>
-          <ActionButton
-            disabled={busy}
-            loading={busy}
-            onPress={deliverOrder}
-          >
-            تم التوصيل للعميل
-          </ActionButton>
-        </>
-      )}
+      {profile?.role === 'courier' && order.status === 'accepted' ? (
+        pendingTransferRequest ? (
+          <Notice tone="warning">الطلب متوقف حتى تراجع الإدارة أو الدعم طلب التحويل.</Notice>
+        ) : (
+          <>
+            {approvedHandoff ? (
+              <>
+                <Notice tone="warning">
+                  استلم الطلب من المندوب {approvedHandoff.fromCourierName} ({approvedHandoff.fromCourierCode}) وسدد له قيمة الأصناف بدلًا من دفعها للمطعم مرة أخرى: {money(order.restaurantDuePiasters)}.
+                </Notice>
+                {approvedHandoff.fromCourierPhone ? (
+                  <ActionButton
+                    onPress={() => run(() => Linking.openURL(`tel:${approvedHandoff.fromCourierPhone}`))}
+                    tone="outline"
+                  >
+                    الاتصال بالمندوب السابق
+                  </ActionButton>
+                ) : null}
+              </>
+            ) : (
+              <Notice tone="info">عند استلام الطلب من المطعم، ادفع للمطعم: {money(order.restaurantDuePiasters)}</Notice>
+            )}
+            <ActionButton
+              disabled={busy}
+              loading={busy}
+              onPress={() => run(() => advanceOrder(order.id, 'picked_up'), 'تم تسجيل استلام الطلب وبدء التوصيل.')}
+            >
+              {approvedHandoff ? 'استلمت الطلب من المندوب السابق وبدأت التوصيل' : 'استلمت الطلب وأبدأ التوصيل'}
+            </ActionButton>
+          </>
+        )
+      ) : null}
+      {profile?.role === 'courier' && order.status === 'picked_up' ? (
+        pendingTransferRequest ? (
+          <Notice tone="warning">أوقف التوصيل حتى تراجع الإدارة أو الدعم طلب التحويل.</Notice>
+        ) : (
+          <>
+            <Notice tone="info">عند تسليم الطلب للعميل، حصّل منه: {money(order.amountDuePiasters)}</Notice>
+            <ActionButton
+              disabled={busy}
+              loading={busy}
+              onPress={deliverOrder}
+            >
+              تم التوصيل للعميل
+            </ActionButton>
+          </>
+        )
+      ) : null}
 
       {profile?.role === 'courier' && order.status === 'delivered' && (
         <Section title="مبالغ الطلب">
           <Body>المبلغ الذي حصّلته من العميل: {money(order.collectedPiasters ?? order.amountDuePiasters)}</Body>
-          <Body>المبلغ الذي دفعته للمطعم: {money(order.paidToRestaurantPiasters ?? order.restaurantDuePiasters)}</Body>
-          <Notice tone="info">تُسجّل المبالغ تلقائيًا من إجمالي الطلب عند تحديث حالته؛ لا تحتاج لكتابتها.</Notice>
+          <Body>المبلغ الذي دفعته للمطعم: {money(order.paidToRestaurantPiasters ?? (approvedHandoff ? 0 : order.restaurantDuePiasters))}</Body>
+          {approvedHandoff ? (
+            <Body>
+              المبلغ الذي سددته للمندوب {approvedHandoff.fromCourierName}: {money(order.paidToPreviousCourierPiasters ?? order.restaurantDuePiasters)}
+            </Body>
+          ) : null}
+          <Notice tone="info">تُسجّل المبالغ تلقائيًا عند بدء التوصيل وتسليم الطلب.</Notice>
         </Section>
       )}
     </Page>
@@ -674,6 +788,19 @@ const styles = StyleSheet.create({
   itemText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 23, textAlign: 'right', writingDirection: 'rtl' },
   itemDetails: { flex: 1, gap: 4 },
   itemSubtext: { color: colors.muted, fontSize: 12, textAlign: 'right', writingDirection: 'rtl' },
+  transferReasons: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: spacing.sm },
+  transferReason: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  transferReasonSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  transferReasonText: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  transferReasonTextSelected: { color: colors.white },
   returnPhoto: {
     width: '100%',
     height: 220,

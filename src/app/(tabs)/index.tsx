@@ -35,7 +35,10 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
     >
       <View style={styles.orderMain}>
         <Text style={styles.orderCode}>{order.code}</Text>
-        <Text style={styles.orderInfo}>{order.restaurantName} · {order.customerAddress}</Text>
+        <Text style={styles.orderInfo}>
+          {order.restaurantName} · {order.customerAddress}
+          {order.orderSource === 'admin' ? ' · طلب أنشأته الإدارة' : ''}
+        </Text>
       </View>
       <StatusTag status={order.status} />
     </Pressable>
@@ -480,7 +483,7 @@ function CourierHome() {
   const deliveredOrders = allMyOrders.filter((order) => order.status === 'delivered');
   const todayOrders = deliveredOrders.filter((order) => order.deliveredAt && isToday(order.deliveredAt));
   const todayCollected = todayOrders.reduce(
-    (total, order) => total + (order.collectedPiasters ?? 0),
+    (total, order) => total + (order.deliveryFeePiasters ?? 0),
     0,
   );
 
@@ -582,7 +585,7 @@ function CourierHome() {
         <Metric value={String(todayOrders.length)} label="طلبات تم توصيلها اليوم" />
         <Metric
           value={(todayCollected / 100).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}
-          label="كاش تم تحصيله اليوم · جنيه"
+          label="رسوم التوصيل المحصلة اليوم · جنيه"
         />
       </View>
       <Section title="طلباتي">

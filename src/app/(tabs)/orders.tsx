@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -12,19 +12,18 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
   const { profile, couriers, locations, orders, isDemo, assignOrder, assignOrderToNearestCourier } = useApp();
   const [busy, setBusy] = useState(false);
   const [deliveryFeeInput, setDeliveryFeeInput] = useState(
-    order.deliveryFeePiasters == null ? '' : (order.deliveryFeePiasters / 100).toFixed(2),
+    order.orderSource === 'admin' && order.status === 'pending'
+      ? ''
+      : order.deliveryFeePiasters == null
+        ? ''
+        : (order.deliveryFeePiasters / 100).toFixed(2),
   );
 
   const assign = async (courierId: number) => {
     let deliveryFeePiasters: number | undefined;
     if (order.status === 'pending') {
       try {
-        deliveryFeePiasters = deliveryFeeInput.trim()
-          ? parsePiasters(deliveryFeeInput)
-          : order.deliveryFeePiasters;
-        if (deliveryFeePiasters == null) {
-          throw new Error('أدخل رسوم التوصيل لهذا الطلب قبل إرساله.');
-        }
+        deliveryFeePiasters = parsePiasters(deliveryFeeInput);
       } catch (error) {
         Alert.alert('رسوم غير صحيحة', error instanceof Error ? error.message : 'راجع المبلغ.');
         return;
@@ -93,6 +92,9 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
         <Body>{order.customerAddress}</Body>
         <StatusTag status={order.status} />
       </View>
+      {profile?.role === 'restaurant' && order.orderSource === 'admin' ? (
+        <Notice tone="info">أنشأت الإدارة هذا الطلب نيابةً عن المطعم.</Notice>
+      ) : null}
       <Text style={styles.money}>
         {order.deliveryFeePiasters == null
           ? order.status === 'pending'
@@ -114,15 +116,18 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
         <View style={styles.assignArea}>
           <Field
             keyboardType="decimal-pad"
-            label="رسوم التوصيل · جنيه (تُضاف عند الإسناد)"
+            label="رسوم التوصيل · جنيه (مطلوبة قبل الإرسال)"
             onChangeText={setDeliveryFeeInput}
             value={deliveryFeeInput}
           />
+          {!deliveryFeeInput.trim() ? (
+            <Notice tone="warning">أدخل رسوم التوصيل قبل إرسال الطلب لأي مندوب.</Notice>
+          ) : null}
           <Body>
             يختار النظام الأقرب لموقع المطعم ممن لا يحمل طلبًا نشطًا، بشرط تحديث موقعه خلال آخر 5 دقائق.
           </Body>
           <ActionButton
-            disabled={busy || !hasNearestCourier}
+            disabled={busy || !deliveryFeeInput.trim() || !hasNearestCourier}
             loading={busy}
             onPress={() => void assignToNearestCourier()}
           >
@@ -142,7 +147,7 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
               .map((courier) => (
                 <ActionButton
                   key={courier.id}
-                  disabled={busy}
+                  disabled={busy || !deliveryFeeInput.trim()}
                   loading={busy}
                   onPress={() => assign(courier.id)}
                   tone="outline"
@@ -170,9 +175,21 @@ function isEligibleCourier(courier: ReturnType<typeof useApp>['couriers'][number
 }
 
 export default function OrdersScreen() {
-  const { profile, orders, orderReturns, isDemo } = useApp();
-  const [showCourierHistory, setShowCourierHistory] = useState(false);
+  const { profile, orders, restaurants, orderReturns, isDemo } = useApp();
+  const { showHistory: showHistoryParam } = useLocalSearchParams<{ showHistory?: string }>();
+  const showCourierHistory = showHistoryParam === 'true';
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState<number | null>(null);
+  const restaurantOptions = restaurants
+    .filter((restaurant) => orders.some((order) => order.restaurantId === restaurant.id))
+    .sort((first, second) => first.name.localeCompare(second.name, 'ar-EG'));
   const visibleOrders = orders.filter((order) => {
+    if (
+      profile?.role === 'admin' &&
+      selectedRestaurantId !== null &&
+      order.restaurantId !== selectedRestaurantId
+    ) {
+      return false;
+    }
     if (profile?.role === 'restaurant') return order.restaurantId === profile.restaurantId;
     if (profile?.role === 'courier') {
       return (
@@ -185,6 +202,15 @@ export default function OrdersScreen() {
       );
     }
     return true;
+  }).sort((first, second) => {
+    if (profile?.role !== 'admin') return 0;
+    const firstPending = first.status === 'pending';
+    const secondPending = second.status === 'pending';
+    if (firstPending !== secondPending) return firstPending ? -1 : 1;
+    if (firstPending) {
+      return new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime();
+    }
+    return 0;
   });
 
   return (
@@ -197,9 +223,41 @@ export default function OrdersScreen() {
             : 'كل الطلبات'}
       </Heading>
       {profile?.role === 'courier' ? (
-        <ActionButton onPress={() => setShowCourierHistory((showing) => !showing)} tone="outline">
+        <ActionButton
+          onPress={() => router.setParams({ showHistory: showCourierHistory ? 'false' : 'true' })}
+          tone="outline"
+        >
           {showCourierHistory ? 'عرض الطلبات الحالية' : 'عرض الطلبات السابقة'}
         </ActionButton>
+      ) : null}
+      {profile?.role === 'admin' ? (
+        <>
+          <ActionButton onPress={() => router.push('/restaurant-new-order')}>
+            إنشاء طلب باسم الإدارة
+          </ActionButton>
+          <View style={styles.restaurantFilterSection}>
+            <Text style={styles.filterHeading}>تصفية حسب المطعم</Text>
+            <View style={styles.restaurantFilters}>
+              {[{ id: null, name: 'كل المطاعم' }, ...restaurantOptions].map((restaurant) => {
+                const selected = selectedRestaurantId === restaurant.id;
+                return (
+                  <Pressable
+                    key={restaurant.id ?? 'all'}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => setSelectedRestaurantId(restaurant.id)}
+                    style={[styles.restaurantFilter, selected && styles.restaurantFilterSelected]}
+                  >
+                    <Text style={[styles.restaurantFilterText, selected && styles.restaurantFilterTextSelected]}>
+                      {restaurant.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Body>تظهر الطلبات المعلقة أولًا، مرتبة من الأقدم إرسالًا إلى الأحدث.</Body>
+          </View>
+        </>
       ) : null}
       {isDemo && <Notice tone="warning">بيانات تجريبية داخل هذا الجهاز فقط.</Notice>}
       {profile?.role === 'restaurant' && (
@@ -240,4 +298,19 @@ const styles = StyleSheet.create({
   assignArea: { gap: 8, marginTop: 4 },
   assignLabel: { color: colors.text, fontWeight: '700', textAlign: 'right' },
   demoHint: { color: colors.warning, fontSize: 12, textAlign: 'right' },
+  restaurantFilterSection: { gap: spacing.sm, paddingVertical: spacing.sm },
+  filterHeading: { color: colors.text, fontSize: 15, fontWeight: '700', textAlign: 'right' },
+  restaurantFilters: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: spacing.sm },
+  restaurantFilter: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+  },
+  restaurantFilterSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  restaurantFilterText: { color: colors.text, fontSize: 14, fontWeight: '700' },
+  restaurantFilterTextSelected: { color: colors.white },
 });
