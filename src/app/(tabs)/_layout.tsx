@@ -80,10 +80,6 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="order-detail"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
         name="restaurant-new-order"
         options={{ href: null }}
       />

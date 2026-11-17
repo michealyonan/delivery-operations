@@ -2,11 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
-import { useApp, parsePiasters } from '../../state/app-context';
-import { colors, spacing } from '../../theme';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../components/ui';
+import { useApp, parsePiasters } from '../state/app-context';
+import { colors, spacing } from '../theme';
 
-const CourierMap = lazy(() => import('../../components/courier-map'));
+const CourierMap = lazy(() => import('../components/courier-map'));
 const googleMapsKeyConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY);
 
 function money(piasters: number | undefined) {
