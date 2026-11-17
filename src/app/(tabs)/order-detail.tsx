@@ -32,10 +32,14 @@ function formatOrderTime(value?: string) {
 }
 
 export default function OrderDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const rawId = useLocalSearchParams<{ id?: string | string[] }>().id;
+  const orderId = Array.isArray(rawId) ? rawId[0] ?? '' : rawId ?? '';
+  const normalizedOrderId = String(orderId);
   const {
     profile,
     orders,
+    hasLoadedData,
+    refresh,
     orderAssignmentAttempts,
     orderReturns,
     orderTransferRequests,
@@ -52,15 +56,19 @@ export default function OrderDetailScreen() {
     confirmOrderReturn,
     requestOrderTransfer,
   } = useApp();
-  const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
-  const orderReturn = orderReturns.find((item) => item.orderId === id);
+  const order = useMemo(
+    () => orders.find((item) => item.id === normalizedOrderId),
+    [normalizedOrderId, orders],
+  );
+  const [retryingOrder, setRetryingOrder] = useState(false);
+  const orderReturn = orderReturns.find((item) => item.orderId === normalizedOrderId);
   const canCourierViewOrderTimes =
     order?.status === 'delivered' ||
     orderReturn?.status === 'returned_by_courier' ||
     orderReturn?.status === 'closed';
   const courierDidNotAccept = orderAssignmentAttempts.some(
     (attempt) =>
-      attempt.orderId === id &&
+      attempt.orderId === normalizedOrderId &&
       attempt.courierId === profile?.courierId &&
       attempt.status === 'not_accepted',
   );
@@ -73,11 +81,11 @@ export default function OrderDetailScreen() {
       ? undefined
       : couriers.find((courier) => courier.id === order.courierId);
   const pendingTransferRequest = orderTransferRequests.find(
-    (request) => request.orderId === id && request.status === 'pending',
+    (request) => request.orderId === normalizedOrderId && request.status === 'pending',
   );
   const approvedHandoff = orderTransferRequests.find(
     (request) =>
-      request.orderId === id &&
+      request.orderId === normalizedOrderId &&
       request.status === 'approved' &&
       request.toCourierId === profile?.courierId &&
       request.requiresHandoff,
@@ -113,6 +121,13 @@ export default function OrderDetailScreen() {
   }, []);
 
   useEffect(() => {
+    if (!normalizedOrderId || order || isDemo) return;
+    refresh().catch((error: unknown) => {
+      console.error('تعذر تحميل بيانات الطلب عند فتح التفاصيل:', error);
+    });
+  }, [normalizedOrderId, isDemo, order, refresh]);
+
+  useEffect(() => {
     let active = true;
     if (profile?.role === 'restaurant' && order && ['accepted', 'picked_up', 'delivered'].includes(order.status)) {
       getCourierContact(order.id)
@@ -137,9 +152,33 @@ export default function OrderDetailScreen() {
     return (
       <Page>
         <ActionButton onPress={() => router.replace('/(tabs)/orders')} tone="outline">
-          رجوع للخلف
+          رجوع إلى الطلبات
         </ActionButton>
-        <Heading>الطلب غير موجود</Heading>
+        <Heading>{hasLoadedData ? 'تعذر العثور على بيانات الطلب' : 'جارٍ تحميل بيانات الطلب'}</Heading>
+        {hasLoadedData ? (
+          <>
+            <Notice tone="warning">
+              لم تظهر بيانات هذا الطلب في القائمة المحمّلة. حدّث البيانات، وإذا استمرت المشكلة ستظهر رسالة الخطأ أعلى الشاشة.
+            </Notice>
+            <ActionButton
+              disabled={retryingOrder}
+              loading={retryingOrder}
+              onPress={() => {
+                setRetryingOrder(true);
+                refresh()
+                  .catch((error: unknown) => {
+                    Alert.alert(
+                      'تعذر تحميل الطلب',
+                      error instanceof Error ? error.message : 'تحقق من الاتصال ثم أعد المحاولة.',
+                    );
+                  })
+                  .finally(() => setRetryingOrder(false));
+              }}
+            >
+              إعادة تحميل بيانات الطلب
+            </ActionButton>
+          </>
+        ) : null}
       </Page>
     );
   }

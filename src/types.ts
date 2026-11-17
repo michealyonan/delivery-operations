@@ -310,3 +310,21 @@ export interface NewSupportAgentInput {
   fullName: string;
   phone: string;
 }
+
+export interface ShiftSlot {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  capacity: number;
+  createdAt: string;
+}
+
+export interface ShiftBooking {
+  id: string;
+  slotId: string;
+  courierId: number;
+  courierName: string;
+  bookedAt: string;
+  status: 'booked' | 'late' | 'cancelled';
+}

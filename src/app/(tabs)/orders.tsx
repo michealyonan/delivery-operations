@@ -111,7 +111,13 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
     <View style={styles.order}>
       <Pressable
         accessibilityRole="button"
-        onPress={() => router.push({ pathname: '/order-detail', params: { id: order.id } })}
+        accessibilityLabel={`عرض تفاصيل الطلب ${order.code}`}
+        onPress={() =>
+          router.push({
+            pathname: '/(tabs)/order-detail',
+            params: { id: String(order.id) },
+          })
+        }
         style={styles.orderHeader}
       >
         <View style={styles.orderTitle}>
@@ -124,6 +130,17 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
         <Body>{order.customerAddress}</Body>
         <StatusTag status={order.status} />
       </View>
+      <ActionButton
+        onPress={() =>
+          router.push({
+            pathname: '/(tabs)/order-detail',
+            params: { id: String(order.id) },
+          })
+        }
+        tone="outline"
+      >
+        عرض بيانات الطلب
+      </ActionButton>
       {profile?.role === 'restaurant' && order.orderSource === 'admin' ? (
         <>
           <Notice tone="info">طلبته الإدارة من مطعمك؛ راجع التفاصيل ثم اقبله لإرساله للمندوب.</Notice>

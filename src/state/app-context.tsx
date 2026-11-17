@@ -52,6 +52,8 @@ import type {
   SupportConversation,
   SupportConversationStatus,
   SupportMessage,
+  ShiftBooking,
+  ShiftSlot,
   TemporaryCredentials,
   UserRole,
 } from '../types';
@@ -74,9 +76,20 @@ interface AppContextValue {
   locations: CourierLocation[];
   breakRequestsEnabled: boolean;
   supportRevision: number;
+  shiftSlots: ShiftSlot[];
+  shiftBookings: ShiftBooking[];
   loadSupportConversations: () => Promise<SupportConversation[]>;
   loadSupportMessages: (conversationId: string) => Promise<SupportMessage[]>;
   listSupportAgents: () => Promise<SupportAgent[]>;
+  createShiftSlot: (input: {
+    title: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    capacity: number;
+  }) => Promise<ShiftSlot>;
+  bookShiftSlot: (slotId: string) => Promise<ShiftBooking>;
+  cancelShiftBooking: (slotId: string) => Promise<void>;
   createSupportConversation: (
     subject: string,
     body: string,
@@ -430,6 +443,8 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [restaurantMenuItems, setRestaurantMenuItems] = useState<RestaurantMenuItem[]>([]);
   const [locations, setLocations] = useState<CourierLocation[]>([]);
   const [breakRequestsEnabled, setBreakRequestsEnabledState] = useState(true);
+  const [shiftSlots, setShiftSlots] = useState<ShiftSlot[]>([]);
+  const [shiftBookings, setShiftBookings] = useState<ShiftBooking[]>([]);
   const [demoConversations, setDemoConversations] = useState(
     demoSupportConversations.map((conversation) => ({ ...conversation })),
   );
@@ -526,6 +541,145 @@ export function AppProvider({ children }: PropsWithChildren) {
     return base;
   }, []);
 
+  const createShiftSlot = useCallback(
+    async (input: { title: string; date: string; startTime: string; endTime: string; capacity: number; }) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إضافة شفت جديد متاحة للإدارة فقط.');
+      }
+      if (!input.title.trim()) {
+        throw new Error('اكتب عنوانًا للشفت.');
+      }
+      const startAt = new Date(`${input.date}T${input.startTime}:00`).toISOString();
+      const endAt = new Date(`${input.date}T${input.endTime}:00`).toISOString();
+      if (Number.isNaN(new Date(startAt).getTime()) || Number.isNaN(new Date(endAt).getTime())) {
+        throw new Error('تأكد من تاريخ ووقت الشفت.');
+      }
+      const nextSlot: ShiftSlot = {
+        id: isDemo ? `demo-shift-slot-${Date.now()}` : `shift-slot-${Date.now()}`,
+        title: input.title.trim(),
+        startAt,
+        endAt,
+        capacity: Math.max(1, Math.round(input.capacity)),
+        createdAt: new Date().toISOString(),
+      };
+      if (isDemo) {
+        setShiftSlots((current) => [nextSlot, ...current]);
+        return nextSlot;
+      }
+      if (!supabase) {
+        throw new Error('البيانات الحقيقية غير متاحة في هذا الجهاز.');
+      }
+      const { data, error } = await supabase
+        .from('shift_slots')
+        .insert({
+          title: nextSlot.title,
+          starts_at: nextSlot.startAt,
+          ends_at: nextSlot.endAt,
+          capacity: nextSlot.capacity,
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+      const inserted = {
+        id: String(data.id),
+        title: String(data.title),
+        startAt: String(data.starts_at),
+        endAt: String(data.ends_at),
+        capacity: Number(data.capacity ?? nextSlot.capacity),
+        createdAt: String(data.created_at ?? new Date().toISOString()),
+      } satisfies ShiftSlot;
+      setShiftSlots((current) => [inserted, ...current]);
+      return inserted;
+    },
+    [isDemo, profile],
+  );
+
+  const bookShiftSlot = useCallback(
+    async (slotId: string) => {
+      if (!profile || profile.role !== 'courier' || !profile.courierId) {
+        throw new Error('حجز الشيفت متاح للمندوب فقط.');
+      }
+      const slot = shiftSlots.find((item) => item.id === slotId);
+      if (!slot) {
+        throw new Error('لم يتم العثور على الشفت المطلوب.');
+      }
+      const existingBooking = shiftBookings.find(
+        (booking) => booking.slotId === slotId && booking.courierId === profile.courierId,
+      );
+      if (existingBooking && existingBooking.status !== 'cancelled') {
+        return existingBooking;
+      }
+      const nextBooking: ShiftBooking = {
+        id: isDemo ? `demo-shift-booking-${Date.now()}` : `shift-booking-${Date.now()}`,
+        slotId: slot.id,
+        courierId: profile.courierId,
+        courierName: profile.name,
+        bookedAt: new Date().toISOString(),
+        status: 'booked',
+      };
+      if (isDemo) {
+        setShiftBookings((current) => [nextBooking, ...current.filter((item) => item.slotId !== slotId)]);
+        return nextBooking;
+      }
+      if (!supabase) {
+        throw new Error('البيانات الحقيقية غير متاحة في هذا الجهاز.');
+      }
+      const { data, error } = await supabase
+        .from('shift_bookings')
+        .insert({
+          slot_id: slotId,
+          courier_id: profile.courierId,
+          courier_name: profile.name,
+          status: 'booked',
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+      const savedBooking: ShiftBooking = {
+        id: String(data.id),
+        slotId: String(data.slot_id),
+        courierId: Number(data.courier_id),
+        courierName: String(data.courier_name ?? profile.name),
+        bookedAt: String(data.booked_at ?? new Date().toISOString()),
+        status: (data.status as ShiftBooking['status']) ?? 'booked',
+      };
+      setShiftBookings((current) => [savedBooking, ...current.filter((item) => item.slotId !== slotId)]);
+      return savedBooking;
+    },
+    [isDemo, profile, shiftBookings, shiftSlots],
+  );
+
+  const cancelShiftBooking = useCallback(
+    async (slotId: string) => {
+      if (!profile || profile.role !== 'courier' || !profile.courierId) {
+        throw new Error('إلغاء الحجز متاح للمندوب فقط.');
+      }
+      if (isDemo) {
+        setShiftBookings((current) =>
+          current.filter((booking) => !(booking.slotId === slotId && booking.courierId === profile.courierId)),
+        );
+        return;
+      }
+      if (!supabase) {
+        throw new Error('البيانات الحقيقية غير متاحة في هذا الجهاز.');
+      }
+      const { error } = await supabase
+        .from('shift_bookings')
+        .update({ status: 'cancelled' })
+        .eq('slot_id', slotId)
+        .eq('courier_id', profile.courierId);
+      if (error) throw error;
+      setShiftBookings((current) =>
+        current.map((booking) =>
+          booking.slotId === slotId && booking.courierId === profile.courierId
+            ? { ...booking, status: 'cancelled' }
+            : booking,
+        ),
+      );
+    },
+    [isDemo, profile],
+  );
+
   const refreshData = useCallback(async () => {
     if (isDemo) {
       setOrders(cloneDemoOrders());
@@ -547,6 +701,17 @@ export function AppProvider({ children }: PropsWithChildren) {
         demoRestaurantMenuItems.map((item) => ({ ...item })),
       );
       setBreakRequestsEnabledState(true);
+      setShiftSlots([
+        {
+          id: 'demo-shift-slot-1',
+          title: 'شفت صباحي',
+          startAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          endAt: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+          capacity: 4,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
+      setShiftBookings([]);
       return;
     }
     if (!profile || !supabase) return;
@@ -1046,6 +1211,17 @@ export function AppProvider({ children }: PropsWithChildren) {
     setRestaurants(demoRestaurants.map((restaurant) => ({ ...restaurant })));
     setRestaurantMenuItems(demoRestaurantMenuItems.map((item) => ({ ...item })));
     setLocations([]);
+    setShiftSlots([
+      {
+        id: 'demo-shift-slot-1',
+        title: 'شفت صباحي',
+        startAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        endAt: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+        capacity: 4,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setShiftBookings([]);
     setDemoConversations(demoSupportConversations.map((conversation) => ({ ...conversation })));
     setDemoMessages(demoSupportMessages.map((message) => ({ ...message })));
   }, []);
@@ -3158,6 +3334,11 @@ export function AppProvider({ children }: PropsWithChildren) {
       locations,
       breakRequestsEnabled,
       supportRevision,
+      shiftSlots,
+      shiftBookings,
+      createShiftSlot,
+      bookShiftSlot,
+      cancelShiftBooking,
       loadSupportConversations,
       loadSupportMessages,
       listSupportAgents,
@@ -3221,6 +3402,11 @@ export function AppProvider({ children }: PropsWithChildren) {
       locations,
       breakRequestsEnabled,
       supportRevision,
+      shiftSlots,
+      shiftBookings,
+      createShiftSlot,
+      bookShiftSlot,
+      cancelShiftBooking,
       loadSupportConversations,
       loadSupportMessages,
       listSupportAgents,

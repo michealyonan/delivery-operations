@@ -166,8 +166,8 @@ export default function SupportConversationScreen() {
           onPress={() =>
             conversation.relatedOrderId &&
             router.push({
-              pathname: '/order-detail',
-              params: { id: conversation.relatedOrderId },
+              pathname: '/(tabs)/order-detail',
+              params: { id: String(conversation.relatedOrderId ?? '') },
             })
           }
           tone="outline"

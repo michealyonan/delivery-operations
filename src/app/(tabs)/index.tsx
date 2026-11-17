@@ -31,7 +31,12 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => router.push({ pathname: '/order-detail', params: { id: order.id } })}
+      onPress={() =>
+        router.push({
+          pathname: '/(tabs)/order-detail',
+          params: { id: String(order.id) },
+        })
+      }
       style={styles.orderRow}
     >
       <View style={styles.orderMain}>
@@ -315,7 +320,7 @@ function AdminHome() {
                 <ActionButton
                   onPress={() =>
                     router.push({
-                      pathname: '/order-detail',
+                      pathname: '/(tabs)/order-detail',
                       params: { id: selectedOrder.id },
                     })
                   }

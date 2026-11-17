@@ -105,7 +105,12 @@ export default function ReturnOperationsScreen() {
               {order ? (
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => router.push({ pathname: '/order-detail', params: { id: order.id } })}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(tabs)/order-detail',
+                      params: { id: String(order.id) },
+                    })
+                  }
                   style={styles.detailsLink}
                 >
                   <Text style={styles.detailsText}>فتح تفاصيل الطلب</Text>

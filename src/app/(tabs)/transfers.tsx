@@ -120,7 +120,12 @@ export default function TransfersScreen() {
                   </ActionButton>
                   {order ? (
                     <ActionButton
-                      onPress={() => router.push({ pathname: '/order-detail', params: { id: order.id } })}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/(tabs)/order-detail',
+                          params: { id: String(order.id) },
+                        })
+                      }
                       tone="outline"
                     >
                       فتح تفاصيل الطلب
