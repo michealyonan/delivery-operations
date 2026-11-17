@@ -80,7 +80,7 @@ function OrderItem({ order }: { order: DeliveryOrder }) {
     <View style={styles.order}>
       <Pressable
         accessibilityRole="button"
-        onPress={() => router.push({ pathname: '/orders/[id]', params: { id: order.id } })}
+        onPress={() => router.push({ pathname: '/(tabs)/order-detail', params: { id: order.id } })}
         style={styles.orderHeader}
       >
         <View style={styles.orderTitle}>

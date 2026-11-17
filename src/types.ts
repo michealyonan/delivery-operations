@@ -41,6 +41,14 @@ export interface CourierLocation {
   recordedAt: string;
 }
 
+export interface CourierFeeRemittance {
+  id: string;
+  courierId: number;
+  amountPiasters: number;
+  receivedAt: string;
+  receivedBy?: string;
+}
+
 export interface Courier {
   id: number;
   code: string;
@@ -93,12 +101,14 @@ export interface DeliveryOrder {
   notes: string;
   amountDuePiasters: number;
   deliveryFeePiasters?: number;
+  deliveryFeeRemittedPiasters?: number;
   restaurantDuePiasters: number;
   lineItems?: OrderLineItem[];
   collectedPiasters?: number;
   paidToRestaurantPiasters?: number;
   status: OrderStatus;
   createdAt: string;
+  assignedAt?: string;
   lastUnacceptedCourierId?: number;
   assignmentExpiredAt?: string;
   acceptedAt?: string;

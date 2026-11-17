@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Body, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
+import { ActionButton, Body, Heading, Notice, Page, Section, SegmentedSwitch, StatusTag, Subheading } from '../../components/ui';
 import { useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { DeliveryOrder } from '../../types';
@@ -29,7 +29,7 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => router.push({ pathname: '/order-detail', params: { id: order.id } })}
+      onPress={() => router.push({ pathname: '/(tabs)/order-detail', params: { id: order.id } })}
       style={styles.orderRow}
     >
       <View style={styles.orderMain}>
@@ -42,10 +42,15 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
 }
 
 function AdminHome() {
-  const { orders, couriers, locations, isDemo, refresh, signOut } = useApp();
+  const { orders, couriers, locations, isDemo, refresh, signOut, setCourierOnBreak } = useApp();
   const [elapsed, setElapsed] = useState(0);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
+  const [selectedCourierId, setSelectedCourierId] = useState<number | null>(null);
+  const [breakDuration, setBreakDuration] = useState('15');
+  const [breakBusy, setBreakBusy] = useState(false);
+  const [breakMessage, setBreakMessage] = useState('');
+  const [breakMessageTone, setBreakMessageTone] = useState<'info' | 'danger'>('info');
   useEffect(() => {
     const timer = setInterval(() => setElapsed((value) => value + 30_000), 30_000);
     return () => clearInterval(timer);
@@ -73,6 +78,39 @@ function AdminHome() {
   const activeOrders = orders.filter(
     (order) => ['assigned', 'accepted', 'picked_up'].includes(order.status),
   );
+  const selectedCourier = couriers.find((courier) => courier.id === selectedCourierId);
+  const selectedLocation = locations.find((location) => location.courierId === selectedCourierId);
+  const selectedOrder = activeOrders.find((order) => order.courierId === selectedCourierId);
+  const selectedCourierOnBreak =
+    Boolean(selectedCourier?.breakUntil) &&
+    new Date(selectedCourier?.breakUntil ?? 0).getTime() > clock;
+  const selectedCourierEligible =
+    Boolean(selectedCourier?.isActive) &&
+    !selectedCourier?.isTerminated &&
+    Boolean(selectedCourier?.contractEndDate) &&
+    (selectedCourier?.contractEndDate ?? '') >= new Date(clock).toISOString().slice(0, 10);
+
+  const selectCourier = (courierId: number) => {
+    setSelectedCourierId(courierId);
+    setBreakMessage('');
+    setBreakMessageTone('info');
+  };
+
+  const startCourierBreak = async () => {
+    if (!selectedCourier) return;
+    setBreakBusy(true);
+    setBreakMessage('');
+    try {
+      const breakUntil = await setCourierOnBreak(selectedCourier.id, Number(breakDuration));
+      setBreakMessageTone('info');
+      setBreakMessage(`تم إخراج ${selectedCourier.fullName} لبريك حتى ${new Date(breakUntil).toLocaleTimeString('ar-EG')}.`);
+    } catch (error) {
+      setBreakMessageTone('danger');
+      setBreakMessage(error instanceof Error ? error.message : 'تعذر بدء البريك. حاول مرة أخرى.');
+    } finally {
+      setBreakBusy(false);
+    }
+  };
 
   const reload = async () => {
     try {
@@ -155,20 +193,113 @@ function AdminHome() {
           </Notice>
         ) : (
           <Suspense fallback={<View style={styles.map} />}>
-            <CourierMap couriers={couriers} locations={locations} clock={clock} height={420} />
+            <CourierMap
+              couriers={couriers}
+              locations={locations}
+              clock={clock}
+              height={420}
+              onCourierPress={selectCourier}
+              selectedCourierId={selectedCourierId}
+            />
           </Suspense>
         )}
+        {selectedCourier ? (
+          <View style={styles.courierDetails}>
+            <Subheading>{selectedCourier.fullName}</Subheading>
+            <Text style={styles.orderInfo}>كود المندوب: {selectedCourier.code}</Text>
+            <Text style={styles.orderInfo}>
+              الحالة: {selectedCourierOnBreak ? 'في بريك' : selectedCourier.isOnShift ? 'على الشيفت' : 'خارج الشيفت'}
+              {selectedCourier.shiftCloseRequestedAt ? ' · طلب إغلاق الشيفت بانتظار الإدارة' : ''}
+            </Text>
+            <Text style={styles.orderInfo}>
+              آخر موقع: {selectedLocation
+                ? new Date(selectedLocation.recordedAt).toLocaleString('ar-EG')
+                : 'لا يوجد موقع مسجل'}
+            </Text>
+            {selectedOrder ? (
+              <View style={styles.selectedOrder}>
+                <View style={styles.orderHeading}>
+                  <Text style={styles.orderCode}>{selectedOrder.code}</Text>
+                  <StatusTag status={selectedOrder.status} />
+                </View>
+                <Text style={styles.orderInfo}>المطعم: {selectedOrder.restaurantName}</Text>
+                <Text style={styles.orderInfo}>عنوان المطعم: {selectedOrder.restaurantAddress || 'غير مسجل'}</Text>
+                <Text style={styles.orderInfo}>عنوان العميل: {selectedOrder.customerAddress}</Text>
+                <Text style={styles.orderInfo}>
+                  أُرسل للمندوب: {selectedOrder.assignedAt
+                    ? new Date(selectedOrder.assignedAt).toLocaleString('ar-EG')
+                    : 'غير مسجل'}
+                </Text>
+                <Text style={styles.orderInfo}>
+                  قبله المندوب: {selectedOrder.acceptedAt
+                    ? new Date(selectedOrder.acceptedAt).toLocaleString('ar-EG')
+                    : 'لم يقبله بعد'}
+                </Text>
+                <ActionButton
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(tabs)/order-detail',
+                      params: { id: selectedOrder.id },
+                    })
+                  }
+                  tone="outline"
+                >
+                  فتح الطلب وتحويله لمندوب آخر
+                </ActionButton>
+              </View>
+            ) : (
+              <Body>لا يوجد طلب نشط مع هذا المندوب.</Body>
+            )}
+            {selectedCourierOnBreak ? (
+              <Notice>البريك مستمر حتى {new Date(selectedCourier.breakUntil ?? '').toLocaleString('ar-EG')}.</Notice>
+            ) : selectedOrder ? (
+              <Notice tone="warning">حوّل الطلب أو أكمله قبل إخراج المندوب لبريك.</Notice>
+            ) : selectedCourierEligible &&
+              selectedCourier.isOnShift &&
+              !selectedCourier.shiftCloseRequestedAt ? (
+              <>
+                <Text style={styles.orderInfo}>مدة البريك</Text>
+                <SegmentedSwitch
+                  items={[
+                    { key: '5', label: '٥ د' },
+                    { key: '10', label: '١٠ د' },
+                    { key: '15', label: '١٥ د' },
+                    { key: '20', label: '٢٠ د' },
+                    { key: '30', label: '٣٠ د' },
+                    { key: '60', label: '٦٠ د' },
+                  ]}
+                  selected={breakDuration}
+                  onSelect={(value) => setBreakDuration(value)}
+                />
+                <ActionButton loading={breakBusy} onPress={startCourierBreak}>
+                  إخراج المندوب لبريك
+                </ActionButton>
+              </>
+            ) : (
+              <Notice>لا يمكن إخراج المندوب لبريك؛ تأكد من نشاط الحساب وسريان العقد والشيفت.</Notice>
+            )}
+            {breakMessage ? <Notice tone={breakMessageTone}>{breakMessage}</Notice> : null}
+          </View>
+        ) : null}
         {locations.map((location) => {
           const courier = couriers.find((item) => item.id === location.courierId);
           const stale = clock - new Date(location.recordedAt).getTime() > 120_000;
           return (
-            <View key={`loc-${location.courierId}`} style={styles.locationRow}>
+            <Pressable
+              key={`loc-${location.courierId}`}
+              accessibilityRole="button"
+              onPress={() => selectCourier(location.courierId)}
+              style={[
+                styles.locationRow,
+                selectedCourierId === location.courierId && styles.locationRowSelected,
+              ]}
+            >
               <Text style={styles.orderCode}>{courier?.fullName ?? 'مندوب'}</Text>
               <Text style={[styles.orderInfo, stale && { color: colors.warning }]}>
                 {stale ? 'آخر تحديث قديم' : 'موقع مباشر'} ·{' '}
                 {new Date(location.recordedAt).toLocaleTimeString('ar-EG')}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </Section>
@@ -400,6 +531,14 @@ const styles = StyleSheet.create({
   metricLabel: { color: colors.muted, fontSize: 12, textAlign: 'center', writingDirection: 'rtl' },
   actionText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   map: { height: 420, borderRadius: 16 },
+  courierDetails: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceRaised,
+  },
+  selectedOrder: { gap: spacing.xs, paddingTop: spacing.sm },
+  orderHeading: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },
   orderRow: {
     minHeight: 65,
     flexDirection: 'row-reverse',
@@ -417,7 +556,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row-reverse',
     justifyContent: 'space-between',
     paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 8,
   },
+  locationRowSelected: { backgroundColor: colors.surfaceRaised },
   shiftBanner: { padding: spacing.md, borderRadius: 18, gap: spacing.sm },
   shiftOn: { backgroundColor: colors.successSurface },
   shiftOff: { backgroundColor: colors.surfaceRaised },

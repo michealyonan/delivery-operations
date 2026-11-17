@@ -26,6 +26,7 @@ import { isBackendConfigured, supabase } from '../lib/supabase';
 import type {
   AppProfile,
   Courier,
+  CourierFeeRemittance,
   CourierLocation,
   CourierPrivateDetails,
   CourierProfileUpdateInput,
@@ -51,6 +52,7 @@ interface AppContextValue {
   isLoading: boolean;
   isDemo: boolean;
   orders: DeliveryOrder[];
+  courierFeeRemittances: CourierFeeRemittance[];
   couriers: Courier[];
   restaurants: Restaurant[];
   restaurantMenuItems: RestaurantMenuItem[];
@@ -100,6 +102,12 @@ interface AppContextValue {
   advanceOrder: (orderId: string, status: 'picked_up' | 'delivered') => Promise<void>;
   setShift: (active: boolean) => Promise<void>;
   approveCourierShiftClose: (courierId: number) => Promise<void>;
+  rejectCourierShiftClose: (courierId: number) => Promise<void>;
+  setCourierOnBreak: (courierId: number, durationMinutes: number) => Promise<string>;
+  recordCourierFeeRemittance: (
+    courierId: number,
+    amountPiasters: number,
+  ) => Promise<CourierFeeRemittance>;
   setCourierActive: (courierId: number, active: boolean) => Promise<void>;
   setBreakRequestsEnabled: (enabled: boolean) => Promise<void>;
   requestCourierBreak: (durationMinutes: number) => Promise<string>;
@@ -210,6 +218,10 @@ function mapOrder(row: Record<string, unknown>): DeliveryOrder {
     amountDuePiasters: asNumber(row.amount_due_piasters),
     deliveryFeePiasters:
       row.delivery_fee_piasters == null ? undefined : asNumber(row.delivery_fee_piasters),
+    deliveryFeeRemittedPiasters:
+      row.delivery_fee_remitted_piasters == null
+        ? 0
+        : asNumber(row.delivery_fee_remitted_piasters),
     restaurantDuePiasters: asNumber(row.restaurant_due_piasters),
     collectedPiasters:
       row.collected_piasters == null ? undefined : asNumber(row.collected_piasters),
@@ -219,6 +231,7 @@ function mapOrder(row: Record<string, unknown>): DeliveryOrder {
         : asNumber(row.paid_to_restaurant_piasters),
     status: row.status as OrderStatus,
     createdAt: String(row.created_at),
+    assignedAt: row.assigned_at == null ? undefined : String(row.assigned_at),
     lastUnacceptedCourierId:
       row.last_unaccepted_courier_id == null
         ? undefined
@@ -232,6 +245,47 @@ function mapOrder(row: Record<string, unknown>): DeliveryOrder {
         ? String(row.updated_at)
         : undefined,
   };
+}
+
+function allocateCourierFeeRemittance(
+  orders: DeliveryOrder[],
+  courierId: number,
+  amountPiasters: number,
+) {
+  let remaining = amountPiasters;
+  const allocations = new Map<string, number>();
+  const eligible = orders
+    .filter(
+      (order) =>
+        order.courierId === courierId &&
+        order.status === 'delivered' &&
+        (order.deliveryFeePiasters ?? 0) > (order.deliveryFeeRemittedPiasters ?? 0),
+    )
+    .sort((a, b) => {
+      const aTime = new Date(a.deliveredAt ?? a.createdAt).getTime();
+      const bTime = new Date(b.deliveredAt ?? b.createdAt).getTime();
+      return aTime - bTime || a.id.localeCompare(b.id);
+    });
+
+  for (const order of eligible) {
+    if (remaining <= 0) break;
+    const feeDue =
+      (order.deliveryFeePiasters ?? 0) - (order.deliveryFeeRemittedPiasters ?? 0);
+    const allocation = Math.min(feeDue, remaining);
+    allocations.set(order.id, allocation);
+    remaining -= allocation;
+  }
+
+  return orders.map((order) => {
+    const allocation = allocations.get(order.id);
+    return allocation == null
+      ? order
+      : {
+          ...order,
+          deliveryFeeRemittedPiasters:
+            (order.deliveryFeeRemittedPiasters ?? 0) + allocation,
+        };
+  });
 }
 
 function mapSupportConversation(row: Record<string, unknown>): SupportConversation {
@@ -269,6 +323,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [isLoading, setIsLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
+  const [courierFeeRemittances, setCourierFeeRemittances] = useState<CourierFeeRemittance[]>([]);
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [restaurantMenuItems, setRestaurantMenuItems] = useState<RestaurantMenuItem[]>([]);
@@ -372,6 +427,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const refresh = useCallback(async () => {
     if (isDemo) {
       setOrders(cloneDemoOrders());
+      setCourierFeeRemittances([]);
       setCouriers(
         demoCouriers.map((courier) => ({
           ...courier,
@@ -497,6 +553,24 @@ export function AppProvider({ children }: PropsWithChildren) {
         };
       }),
     );
+    if (profile.role === 'admin' || profile.role === 'courier') {
+      const { data: remittanceRows, error: remittancesError } = await supabase
+        .from('courier_fee_remittances')
+        .select('id, courier_id, amount_piasters, received_at, received_by')
+        .order('received_at', { ascending: false });
+      if (remittancesError) throw remittancesError;
+      setCourierFeeRemittances(
+        (remittanceRows ?? []).map((row) => ({
+          id: String(row.id),
+          courierId: asNumber(row.courier_id),
+          amountPiasters: asNumber(row.amount_piasters),
+          receivedAt: String(row.received_at),
+          receivedBy: String(row.received_by),
+        })),
+      );
+    } else {
+      setCourierFeeRemittances([]);
+    }
 
     const { data: settings, error: settingsError } = await supabase
       .from('delivery_settings')
@@ -651,6 +725,17 @@ export function AppProvider({ children }: PropsWithChildren) {
           console.error('تعذر تحديث الطلبات فورًا:', error);
         });
       });
+    if (profile.role === 'admin' || profile.role === 'courier') {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'courier_fee_remittances' },
+        () => {
+          refresh().catch((error: unknown) => {
+            console.error('تعذر تحديث توريدات رسوم التوصيل فورًا:', error);
+          });
+        },
+      );
+    }
     if (profile.role === 'admin' || profile.role === 'restaurant' || profile.role === 'courier') {
       channel.on(
         'postgres_changes',
@@ -734,6 +819,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     setIsDemo(true);
     setProfile(demoProfile(role));
     setOrders(cloneDemoOrders());
+    setCourierFeeRemittances([]);
     const today = new Date();
     const startDate = today.toISOString().slice(0, 10);
     const end = new Date(today);
@@ -769,6 +855,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     setProfile(null);
     setIsDemo(false);
     setOrders([]);
+    setCourierFeeRemittances([]);
     setCouriers([]);
     setRestaurants([]);
     setRestaurantMenuItems([]);
@@ -2065,12 +2152,165 @@ export function AppProvider({ children }: PropsWithChildren) {
     [isDemo, profile],
   );
 
+  const rejectCourierShiftClose = useCallback(
+    async (courierId: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('رفض طلب إغلاق الشيفت متاح للإدارة فقط.');
+      }
+      if (isDemo) {
+        setCouriers((current) =>
+          current.map((courier) =>
+            courier.id === courierId
+              ? { ...courier, shiftCloseRequestedAt: undefined }
+              : courier,
+          ),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('admin_reject_courier_shift_close', {
+        p_courier_id: courierId,
+      });
+      if (error) throw error;
+      setCouriers((current) =>
+        current.map((courier) =>
+          courier.id === courierId
+            ? { ...courier, shiftCloseRequestedAt: undefined }
+            : courier,
+        ),
+      );
+    },
+    [isDemo, profile],
+  );
+
+  const setCourierOnBreak = useCallback(
+    async (courierId: number, durationMinutes: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إخراج المندوب لبريك متاح للإدارة فقط.');
+      }
+      if (![5, 10, 15, 20, 30, 60].includes(durationMinutes)) {
+        throw new Error('اختر مدة بريك مدعومة.');
+      }
+      const courier = couriers.find((item) => item.id === courierId);
+      if (!courier || !courier.isActive || courier.isTerminated) {
+        throw new Error('المندوب غير متاح للبريك.');
+      }
+      if (!courier.isOnShift || courier.shiftCloseRequestedAt) {
+        throw new Error('المندوب ليس على شيفت متاح.');
+      }
+      if (courier.breakUntil && new Date(courier.breakUntil) > new Date()) {
+        throw new Error('المندوب في بريك بالفعل.');
+      }
+      if (orders.some(
+        (order) =>
+          order.courierId === courierId &&
+          ['assigned', 'accepted', 'picked_up'].includes(order.status),
+      )) {
+        throw new Error('حوّل أو أكمل طلب المندوب قبل إخراجه لبريك.');
+      }
+      if (isDemo) {
+        const breakUntil = new Date(Date.now() + durationMinutes * 60_000).toISOString();
+        setCouriers((current) =>
+          current.map((item) =>
+            item.id === courierId
+              ? { ...item, isOnBreak: true, breakUntil }
+              : item,
+          ),
+        );
+        return breakUntil;
+      }
+      const { data, error } = await assertBackend().rpc('admin_start_courier_break', {
+        p_courier_id: courierId,
+        p_duration_minutes: durationMinutes,
+      });
+      if (error) throw error;
+      if (typeof data !== 'string') {
+        throw new Error('لم يرجع الخادم موعد انتهاء البريك.');
+      }
+      setCouriers((current) =>
+        current.map((item) =>
+          item.id === courierId
+            ? { ...item, isOnBreak: true, breakUntil: data }
+            : item,
+        ),
+      );
+      return data;
+    },
+    [couriers, isDemo, orders, profile],
+  );
+
+  const recordCourierFeeRemittance = useCallback(
+    async (courierId: number, amountPiasters: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('تسجيل استلام التوريد متاح للإدارة فقط.');
+      }
+      if (!Number.isSafeInteger(amountPiasters) || amountPiasters <= 0) {
+        throw new Error('أدخل مبلغًا صحيحًا أكبر من صفر.');
+      }
+      const courier = couriers.find((item) => item.id === courierId);
+      if (!courier) throw new Error('لم يتم العثور على حساب المندوب.');
+
+      if (isDemo) {
+        const outstanding = orders
+          .filter((order) => order.courierId === courierId && order.status === 'delivered')
+          .reduce(
+            (total, order) =>
+              total +
+              Math.max(
+                0,
+                (order.deliveryFeePiasters ?? 0) -
+                  (order.deliveryFeeRemittedPiasters ?? 0),
+              ),
+            0,
+          );
+        if (amountPiasters > outstanding) {
+          throw new Error('المبلغ أكبر من مديونية رسوم التوصيل المستحقة.');
+        }
+      }
+
+      let id: string;
+      if (isDemo) {
+        id = `demo-${Date.now()}`;
+      } else {
+        const { data, error } = await assertBackend().rpc(
+          'admin_record_courier_fee_remittance',
+          {
+            p_courier_id: courierId,
+            p_amount_piasters: amountPiasters,
+          },
+        );
+        if (error) throw error;
+        if (
+          (typeof data !== 'number' && typeof data !== 'string') ||
+          String(data).trim() === ''
+        ) {
+          throw new Error('لم يرجع الخادم رقم إيصال التوريد.');
+        }
+        id = String(data);
+      }
+
+      const remittance: CourierFeeRemittance = {
+        id,
+        courierId,
+        amountPiasters,
+        receivedAt: new Date().toISOString(),
+        receivedBy: profile.id,
+      };
+      setOrders((current) =>
+        allocateCourierFeeRemittance(current, courierId, amountPiasters),
+      );
+      setCourierFeeRemittances((current) => [remittance, ...current]);
+      return remittance;
+    },
+    [couriers, isDemo, orders, profile],
+  );
+
   const contextValue = useMemo<AppContextValue>(
     () => ({
       profile,
       isLoading,
       isDemo,
       orders,
+      courierFeeRemittances,
       couriers,
       restaurants,
       restaurantMenuItems,
@@ -2101,6 +2341,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       advanceOrder,
       setShift,
       approveCourierShiftClose,
+      rejectCourierShiftClose,
+      setCourierOnBreak,
+      recordCourierFeeRemittance,
       setCourierActive,
       setBreakRequestsEnabled,
       requestCourierBreak,
@@ -2118,6 +2361,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       isLoading,
       isDemo,
       orders,
+      courierFeeRemittances,
       couriers,
       restaurants,
       restaurantMenuItems,
@@ -2148,6 +2392,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       advanceOrder,
       setShift,
       approveCourierShiftClose,
+      rejectCourierShiftClose,
+      setCourierOnBreak,
+      recordCourierFeeRemittance,
       setCourierActive,
       setBreakRequestsEnabled,
       requestCourierBreak,

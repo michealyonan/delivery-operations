@@ -20,15 +20,18 @@ export default function CourierMap({
   clock,
   height = 280,
   onCourierPress,
+  selectedCourierId,
 }: {
   couriers: Courier[];
   locations: CourierLocation[];
   clock: number;
   height?: number;
   onCourierPress?: (courierId: number) => void;
+  selectedCourierId?: number | null;
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [mapSize, setMapSize] = useState({ width: 720, height });
+  const [zoomAdjustment, setZoomAdjustment] = useState(0);
 
   useEffect(() => {
     const element = mapRef.current;
@@ -59,7 +62,8 @@ export default function CourierMap({
     const spanX = Math.max(maxX - minX, 1 / 2 ** 16);
     const spanY = Math.max(maxY - minY, 1 / 2 ** 16);
     const scale = Math.min((mapSize.width - 64) / spanX, (mapSize.height - 64) / spanY);
-    const zoom = Math.max(4, Math.min(16, Math.floor(Math.log2(scale / TILE_SIZE))));
+    const fitZoom = Math.floor(Math.log2(scale / TILE_SIZE));
+    const zoom = Math.max(4, Math.min(18, fitZoom + zoomAdjustment));
     const worldSize = TILE_SIZE * 2 ** zoom;
     const left = centerX * worldSize - mapSize.width / 2;
     const top = centerY * worldSize - mapSize.height / 2;
@@ -91,7 +95,7 @@ export default function CourierMap({
         top: point.y * worldSize - top,
       })),
     };
-  }, [locations, mapSize]);
+  }, [locations, mapSize, zoomAdjustment]);
 
   return (
     <div
@@ -121,9 +125,39 @@ export default function CourierMap({
           }}
         />
       ))}
+      <div
+        role="group"
+        aria-label="تكبير وتصغير الخريطة"
+        style={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 5,
+        }}
+      >
+        <button
+          type="button"
+          aria-label="تكبير الخريطة"
+          onClick={() => setZoomAdjustment((value) => Math.min(8, value + 1))}
+          style={zoomButtonStyle}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          aria-label="تصغير الخريطة"
+          onClick={() => setZoomAdjustment((value) => Math.max(-8, value - 1))}
+          style={zoomButtonStyle}
+        >
+          −
+        </button>
+      </div>
       {map.markers.map(({ location, left, top }) => {
         const courier = couriers.find((item) => item.id === location.courierId);
         const stale = clock - new Date(location.recordedAt).getTime() > 120_000;
+        const selected = selectedCourierId === location.courierId;
         return (
           <button
             key={location.courierId}
@@ -135,15 +169,16 @@ export default function CourierMap({
               position: 'absolute',
               left,
               top,
-              width: 20,
-              height: 20,
+              width: selected ? 28 : 20,
+              height: selected ? 28 : 20,
               borderRadius: 12,
-              border: '3px solid white',
-              backgroundColor: stale ? '#b7791f' : '#167c72',
-              boxShadow: '0 2px 6px rgba(0,0,0,.35)',
+              border: selected ? '4px solid white' : '3px solid white',
+              backgroundColor: selected ? '#b42318' : stale ? '#b7791f' : '#167c72',
+              boxShadow: selected ? '0 0 0 3px rgba(180,35,24,.25), 0 2px 6px rgba(0,0,0,.35)' : '0 2px 6px rgba(0,0,0,.35)',
               transform: 'translate(-50%, -50%)',
               padding: 0,
               cursor: onCourierPress ? 'pointer' : 'default',
+              zIndex: selected ? 2 : 1,
             }}
           />
         );
@@ -169,3 +204,16 @@ export default function CourierMap({
     </div>
   );
 }
+
+const zoomButtonStyle = {
+  width: 40,
+  height: 40,
+  border: '1px solid #d8e0e5',
+  borderRadius: 10,
+  backgroundColor: '#ffffff',
+  color: '#173042',
+  fontSize: 24,
+  lineHeight: '32px',
+  fontWeight: 700,
+  cursor: 'pointer',
+} as const;

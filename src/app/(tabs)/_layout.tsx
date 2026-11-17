@@ -7,12 +7,13 @@ import { useApp } from '../../state/app-context';
 import { colors } from '../../theme';
 
 export default function TabLayout() {
-  const { profile } = useApp();
+  const { profile, couriers } = useApp();
   const insets = useSafeAreaInsets();
   if (!profile) return <Redirect href="/login" />;
 
   const admin = profile.role === 'admin';
   const supportOnly = profile.role === 'support';
+  const pendingShiftCloseCount = couriers.filter((courier) => courier.shiftCloseRequestedAt).length;
 
   return (
     <Tabs
@@ -64,6 +65,17 @@ export default function TabLayout() {
           href: supportOnly ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="cash-multiple" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="shift-requests"
+        options={{
+          title: 'طلبات الشيفت',
+          href: admin ? undefined : null,
+          tabBarBadge: admin && pendingShiftCloseCount > 0 ? pendingShiftCloseCount : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="account-clock-outline" color={String(color)} size={size} />
           ),
         }}
       />

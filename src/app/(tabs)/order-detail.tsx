@@ -13,6 +13,19 @@ function money(piasters: number | undefined) {
   return `${((piasters ?? 0) / 100).toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م`;
 }
 
+function formatOrderTime(value?: string) {
+  if (!value) return 'لم يتم بعد';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'غير متاح';
+  return date.toLocaleString('ar-EG', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
@@ -224,6 +237,13 @@ export default function OrderDetailScreen() {
         ) : null}
       </Section>
 
+      <Section title="مواعيد الطلب">
+        <Body>إرسال المطعم للطلب: {formatOrderTime(order.createdAt)}</Body>
+        <Body>إرسال الإدارة للمندوب: {formatOrderTime(order.assignedAt)}</Body>
+        <Body>قبول المندوب للطلب: {formatOrderTime(order.acceptedAt)}</Body>
+        <Body>تسليم الطلب للعميل: {formatOrderTime(order.deliveredAt)}</Body>
+      </Section>
+
       <Section title="العميل">
         <Body>{order.customerName}</Body>
         <Body>{order.customerPhone}</Body>
@@ -326,22 +346,31 @@ export default function OrderDetailScreen() {
           </ActionButton>
           {onShiftCouriers.length === 0 ? (
             <Notice tone="warning">لا يوجد مندوب نشط على الشيفت الآن.</Notice>
-          ) : showCourierMap ? (
+          ) : (
             <>
-              {Platform.OS !== 'web' && !googleMapsKeyConfigured ? (
-                <Notice tone="warning">الخريطة غير مهيأة على هذا الجهاز؛ يمكنك اختيار المندوب من القائمة أدناه.</Notice>
-              ) : onShiftLocations.length === 0 ? (
-                <Notice>لا توجد مواقع مرسلة للمندوبين حاليًا؛ شغّل مشاركة الموقع لعرضهم على الخريطة.</Notice>
-              ) : (
-                <Suspense fallback={<Notice>جارٍ تحميل الخريطة...</Notice>}>
-                  <CourierMap
-                    couriers={onShiftCouriers}
-                    locations={onShiftLocations}
-                    clock={clock}
-                    onCourierPress={setSelectedCourierId}
-                  />
-                </Suspense>
-              )}
+              {showCourierMap ? (
+                <>
+                  {Platform.OS !== 'web' && !googleMapsKeyConfigured ? (
+                    <Notice tone="warning">
+                      الخريطة غير مهيأة على هذا الجهاز؛ يمكنك اختيار المندوب من القائمة أدناه.
+                    </Notice>
+                  ) : onShiftLocations.length === 0 ? (
+                    <Notice>
+                      لا توجد مواقع مرسلة للمندوبين حاليًا؛ شغّل مشاركة الموقع لعرضهم على الخريطة.
+                    </Notice>
+                  ) : (
+                    <Suspense fallback={<Notice>جارٍ تحميل الخريطة...</Notice>}>
+                      <CourierMap
+                        couriers={onShiftCouriers}
+                        locations={onShiftLocations}
+                        clock={clock}
+                        onCourierPress={setSelectedCourierId}
+                      />
+                    </Suspense>
+                  )}
+                </>
+              ) : null}
+              <Body>اختيار المندوب يدويًا</Body>
               {onShiftCouriers.map((courier) => {
                 const activeOrder = orders.find(
                   (item) =>
@@ -351,7 +380,10 @@ export default function OrderDetailScreen() {
                 );
                 const location = onShiftLocations.find((item) => item.courierId === courier.id);
                 const isCurrentCourier = order.courierId === courier.id;
+                const contractExpired =
+                  courier.contractEndDate < new Date(clock).toISOString().slice(0, 10);
                 const isAvailable =
+                  !contractExpired &&
                   !courier.isOnBreak &&
                   !courier.shiftCloseRequestedAt &&
                   !activeOrder &&
@@ -373,6 +405,8 @@ export default function OrderDetailScreen() {
                             ? 'المندوب الحالي لهذا الطلب'
                             : activeOrder
                               ? `مشغول بالطلب ${activeOrder.code}`
+                              : contractExpired
+                                ? 'انتهى عقد المندوب؛ لا يمكن إسناد طلب جديد.'
                               : courier.shiftCloseRequestedAt
                                 ? 'طلب إغلاق الشيفت بانتظار موافقة الإدارة؛ لا يمكن إسناد طلب جديد.'
                               : courier.isOnBreak
@@ -403,7 +437,7 @@ export default function OrderDetailScreen() {
                 );
               })}
             </>
-          ) : null}
+          )}
         </Section>
       )}
 
