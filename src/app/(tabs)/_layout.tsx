@@ -187,10 +187,6 @@ export default function TabLayout() {
         options={{ href: null }}
       />
       <Tabs.Screen
-        name="order-detail"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
         name="restaurant-menu"
         options={{ href: null }}
       />
@@ -212,10 +208,6 @@ export default function TabLayout() {
             <MaterialCommunityIcons name="motorbike" color={String(color)} size={size} />
           ),
         }}
-      />
-      <Tabs.Screen
-        name="couriers/[id]"
-        options={{ href: null }}
       />
       <Tabs.Screen
         name="restaurants"

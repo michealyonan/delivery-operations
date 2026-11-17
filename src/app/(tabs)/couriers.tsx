@@ -51,7 +51,7 @@ export default function CouriersScreen() {
   const [activeSection, setActiveSection] = useState<'accounts' | 'create'>('accounts');
 
   const openCourier = (courierId: number) => {
-    router.push({ pathname: '/couriers/[id]', params: { id: String(courierId) } });
+    router.push({ pathname: '/courier-details/[id]', params: { id: String(courierId) } });
   };
 
   const toggleBreakRequests = async () => {

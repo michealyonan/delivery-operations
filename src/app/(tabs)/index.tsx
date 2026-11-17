@@ -31,7 +31,7 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => router.push({ pathname: '/(tabs)/order-detail', params: { id: order.id } })}
+      onPress={() => router.push({ pathname: '/order-details/[id]', params: { id: order.id } })}
       style={styles.orderRow}
     >
       <View style={styles.orderMain}>
@@ -274,7 +274,7 @@ function AdminHome() {
             <ActionButton
               onPress={() =>
                 router.push({
-                  pathname: '/(tabs)/couriers/[id]',
+                  pathname: '/courier-details/[id]',
                   params: { id: String(selectedCourier.id) },
                 })
               }
@@ -315,7 +315,7 @@ function AdminHome() {
                 <ActionButton
                   onPress={() =>
                     router.push({
-                      pathname: '/(tabs)/order-detail',
+                      pathname: '/order-details/[id]',
                       params: { id: selectedOrder.id },
                     })
                   }
