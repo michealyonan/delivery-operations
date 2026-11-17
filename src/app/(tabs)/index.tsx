@@ -1,10 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Heading, Notice, Page, Section, SegmentedSwitch, StatusTag, Subheading } from '../../components/ui';
 import { BreakCountdown } from '../../components/break-countdown';
+import { Alert } from '../../lib/platform-alert';
 import { useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { DeliveryOrder } from '../../types';
@@ -46,7 +47,18 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
 }
 
 function AdminHome() {
-  const { orders, couriers, locations, isDemo, refresh, signOut, setCourierOnBreak, endCourierBreak } = useApp();
+  const {
+    orders,
+    couriers,
+    locations,
+    restaurants,
+    hasLoadedData,
+    isDemo,
+    refresh,
+    signOut,
+    setCourierOnBreak,
+    endCourierBreak,
+  } = useApp();
   const [elapsed, setElapsed] = useState(0);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -64,6 +76,12 @@ function AdminHome() {
     (order) => order.status === 'delivered' && order.deliveredAt && isToday(order.deliveredAt),
   ).length;
   const pending = orders.filter((order) => order.status === 'pending').length;
+  const noAdminData =
+    hasLoadedData &&
+    !isDemo &&
+    orders.length === 0 &&
+    couriers.length === 0 &&
+    restaurants.length === 0;
   const activeCouriers = couriers.filter((courier) => courier.isActive && !courier.isTerminated);
   const onShift = activeCouriers.filter(
     (courier) =>
@@ -176,10 +194,22 @@ function AdminHome() {
       </View>
       {logoutError ? <Notice tone="danger">{logoutError}</Notice> : null}
       {isDemo && <Notice tone="warning">معاينة ببيانات توضيحية فقط؛ لا يوجد تتبع مباشر في الوضع التجريبي.</Notice>}
+      {noAdminData ? (
+        <Notice tone="warning">
+          لا تظهر سجلات في حساب الإدارة. إذا كانت لديك بيانات سابقة، لا تُعد إنشاء الحسابات؛ تحقق من
+          اتصال قاعدة البيانات وصلاحيات الإدارة ثم أعد تحميل البيانات.
+        </Notice>
+      ) : null}
       <View style={styles.metrics}>
         <Metric value={String(pending)} label="بانتظار الإسناد" />
         <Metric value={String(deliveredToday)} label="تم توصيلها اليوم" />
       </View>
+      <Section title="طلب جديد من الإدارة">
+        <Body>أنشئ الطلب باسم الإدارة، وبعد حفظه أضف رسوم التوصيل وأسنده لمندوب من قائمة الطلبات.</Body>
+        <ActionButton onPress={() => router.push('/restaurant-new-order')}>
+          إنشاء طلب باسم الإدارة
+        </ActionButton>
+      </Section>
 
       <Section title="حالة المناديب الآن">
         <View style={styles.metrics}>

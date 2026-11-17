@@ -93,46 +93,52 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.keyboard}
     >
-      <Page>
-        <View style={styles.brandMark}>
-          <Text style={styles.markText}>د</Text>
-        </View>
-        <Heading>إدارة التوصيل</Heading>
-        <Body>طلبات المطاعم، حركة المندوبين، وحسابات واضحة لكل طلب.</Body>
+      <Page width="narrow">
+        <View style={styles.loginCard}>
+          <View style={styles.brandHeader}>
+            <View style={styles.brandMark}>
+              <Text style={styles.markText}>د</Text>
+            </View>
+            <View style={styles.brandCopy}>
+              <Heading>دليفرى</Heading>
+              <Body>إدارة الطلبات والمندوبين والمطاعم</Body>
+            </View>
+          </View>
 
-        {!isBackendConfigured && (
-          <Notice tone="warning">
-            وضع المعاينة فقط: البيانات المعروضة تجريبية ولا تنتقل بين الأجهزة. لا تدخل بيانات
-            مندوبين حقيقية قبل إعداد قاعدة البيانات والتخزين الخاص.
-          </Notice>
-        )}
+          {!isBackendConfigured && (
+            <Notice tone="warning">
+              وضع المعاينة فقط: البيانات المعروضة تجريبية ولا تنتقل بين الأجهزة. لا تدخل بيانات
+              مندوبين حقيقية قبل إعداد قاعدة البيانات والتخزين الخاص.
+            </Notice>
+          )}
 
-        <Subheading>تسجيل الدخول</Subheading>
-        <Field
-          autoCapitalize="none"
-          autoComplete="email"
-          keyboardType="email-address"
-          label="البريد الإلكتروني"
-          onChangeText={setEmail}
-          value={email}
-        />
-        <Field
-          autoCapitalize="none"
-          label="كلمة المرور"
-          onChangeText={setPassword}
-          secureTextEntry
-          value={password}
-        />
-        {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
-        {statusMessage ? <Notice>{statusMessage}</Notice> : null}
-        <ActionButton loading={busy} onPress={submit}>
-          دخول
-        </ActionButton>
-        {Platform.OS === 'web' ? (
-          <ActionButton loading={resetBusy} onPress={sendPasswordReset} tone="outline">
-            نسيت كلمة المرور؟
+          <Subheading>تسجيل الدخول</Subheading>
+          <Field
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            label="البريد الإلكتروني"
+            onChangeText={setEmail}
+            value={email}
+          />
+          <Field
+            autoCapitalize="none"
+            label="كلمة المرور"
+            onChangeText={setPassword}
+            secureTextEntry
+            value={password}
+          />
+          {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
+          {statusMessage ? <Notice>{statusMessage}</Notice> : null}
+          <ActionButton loading={busy} onPress={submit}>
+            دخول
           </ActionButton>
-        ) : null}
+          {Platform.OS === 'web' ? (
+            <ActionButton loading={resetBusy} onPress={sendPasswordReset} tone="outline">
+              نسيت كلمة المرور؟
+            </ActionButton>
+          ) : null}
+        </View>
       </Page>
     </KeyboardAvoidingView>
   );
@@ -140,13 +146,30 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   keyboard: { flex: 1 },
+  loginCard: {
+    gap: 20,
+    padding: 24,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.outline,
+    backgroundColor: colors.surface,
+  },
+  brandHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 16,
+  },
+  brandCopy: {
+    flex: 1,
+    gap: 6,
+  },
   brandMark: {
-    width: 58,
-    height: 58,
-    borderRadius: 18,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  markText: { color: colors.white, fontSize: 32, fontWeight: '800' },
+  markText: { color: colors.white, fontSize: 34, fontWeight: '800' },
 });

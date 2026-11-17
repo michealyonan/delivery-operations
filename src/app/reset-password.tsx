@@ -72,8 +72,8 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <Page>
-      <Heading>إدارة التوصيل</Heading>
+    <Page width="narrow">
+      <Heading>دليفرى</Heading>
       <Subheading>استعادة كلمة المرور</Subheading>
       {!sessionReady ? <Body>جارٍ التحقق من رابط الاستعادة...</Body> : null}
       {sessionReady && !hasSession && !completed ? (

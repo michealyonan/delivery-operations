@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   type TextInputProps,
+  Platform,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +16,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { OrderStatus } from '../types';
 import { colors, spacing } from '../theme';
 
-export function Page({ children }: PropsWithChildren) {
+export function Page({
+  children,
+  width = 'wide',
+}: PropsWithChildren<{ width?: 'wide' | 'narrow' }>) {
   const segments = useSegments();
   const insets = useSafeAreaInsets();
   const isTabScreen = segments[0] === '(tabs)';
@@ -25,6 +29,8 @@ export function Page({ children }: PropsWithChildren) {
       <ScrollView
         contentContainerStyle={[
           styles.page,
+          Platform.OS === 'web' && styles.pageWeb,
+          width === 'narrow' && styles.pageNarrow,
           isTabScreen && { paddingBottom: 96 + insets.bottom },
         ]}
         keyboardShouldPersistTaps="handled"
@@ -213,14 +219,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   page: {
+    width: '100%',
+    maxWidth: 1180,
+    alignSelf: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: 44,
     gap: spacing.md,
   },
+  pageWeb: {
+    paddingHorizontal: 32,
+    paddingTop: 28,
+    paddingBottom: 64,
+    gap: spacing.lg,
+  },
+  pageNarrow: {
+    maxWidth: 560,
+  },
   heading: {
     color: colors.text,
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '800',
     textAlign: 'right',
     writingDirection: 'rtl',
@@ -234,8 +252,8 @@ const styles = StyleSheet.create({
   },
   body: {
     color: colors.text,
-    fontSize: 15,
-    lineHeight: 23,
+    fontSize: 16,
+    lineHeight: 25,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
@@ -251,10 +269,10 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   input: {
-    minHeight: 52,
+    minHeight: 54,
     borderWidth: 1,
     borderColor: colors.outline,
-    borderRadius: 14,
+    borderRadius: 13,
     backgroundColor: colors.surface,
     paddingHorizontal: 14,
     color: colors.text,
@@ -268,7 +286,7 @@ const styles = StyleSheet.create({
   button: {
     minHeight: 52,
     paddingHorizontal: 18,
-    borderRadius: 14,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -303,7 +321,7 @@ const styles = StyleSheet.create({
   },
   notice: {
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 13,
   },
   statusTag: {
     alignSelf: 'flex-start',
@@ -318,6 +336,11 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.outline,
+    backgroundColor: colors.surface,
   },
   sectionHeader: {
     flexDirection: 'row-reverse',

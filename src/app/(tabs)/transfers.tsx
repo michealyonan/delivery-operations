@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Heading, Notice, Page, Section } from '../../components/ui';
+import { Alert } from '../../lib/platform-alert';
 import { orderTransferReasonLabels } from '../../lib/order-transfer';
 import { useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';

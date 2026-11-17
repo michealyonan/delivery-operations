@@ -1,16 +1,26 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActionButton, Notice } from '../../components/ui';
 import { useApp } from '../../state/app-context';
 import { colors } from '../../theme';
 
 export default function TabLayout() {
-  const { profile, couriers, orderAssignmentAttempts, orderReturns, orderTransferRequests } = useApp();
+  const {
+    profile,
+    couriers,
+    orderAssignmentAttempts,
+    orderReturns,
+    orderTransferRequests,
+    refresh,
+    refreshError,
+  } = useApp();
   const insets = useSafeAreaInsets();
   const [now, setNow] = useState<number | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
   useEffect(() => {
     const firstUpdate = setTimeout(() => setNow(Date.now()), 0);
     const timer = setInterval(() => setNow(Date.now()), 15_000);
@@ -37,29 +47,54 @@ export default function TabLayout() {
     (request) => request.status === 'pending',
   ).length;
 
+  const retryRefresh = async () => {
+    setRefreshBusy(true);
+    try {
+      await refresh();
+    } catch (error) {
+      console.error('تعذر إعادة تحميل بيانات التطبيق:', error);
+    } finally {
+      setRefreshBusy(false);
+    }
+  };
+
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.muted,
-        tabBarStyle: {
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: colors.surface,
-          borderTopColor: colors.outline,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          height: 70 + insets.bottom,
-          paddingBottom: Math.max(insets.bottom, 8),
-          paddingTop: 6,
-          elevation: 8,
-          zIndex: 10,
-        },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
-      }}
-    >
+    <View style={styles.root}>
+      {refreshError ? (
+        <View style={styles.refreshBanner}>
+          <Notice tone="danger">{refreshError}</Notice>
+          <ActionButton
+            disabled={refreshBusy}
+            loading={refreshBusy}
+            onPress={() => void retryRefresh()}
+            tone="outline"
+          >
+            إعادة تحميل البيانات
+          </ActionButton>
+        </View>
+      ) : null}
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.muted,
+          tabBarStyle: {
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: colors.surface,
+            borderTopColor: colors.outline,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            height: 70 + insets.bottom,
+            paddingBottom: Math.max(insets.bottom, 8),
+            paddingTop: 6,
+            elevation: 8,
+            zIndex: 10,
+          },
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+        }}
+      >
       <Tabs.Screen
         name="index"
         options={{
@@ -212,6 +247,17 @@ export default function TabLayout() {
           ),
         }}
       />
-    </Tabs>
+      </Tabs>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  refreshBanner: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    gap: 8,
+    backgroundColor: colors.background,
+  },
+});

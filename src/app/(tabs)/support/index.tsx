@@ -1,11 +1,12 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Heading, Notice, Page } from '../../../components/ui';
 import { BreakCountdown } from '../../../components/break-countdown';
 import { isBackendConfigured, supabase } from '../../../lib/supabase';
+import { Alert } from '../../../lib/platform-alert';
 import { useApp } from '../../../state/app-context';
 import { colors, spacing } from '../../../theme';
 import type { SupportConversation, SupportConversationStatus } from '../../../types';

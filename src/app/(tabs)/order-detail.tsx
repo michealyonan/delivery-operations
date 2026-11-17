@@ -2,9 +2,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import type { ImagePickerAsset } from 'expo-image-picker';
-import { Alert, Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
+import { Alert } from '../../lib/platform-alert';
 import { orderTransferReasonOptions } from '../../lib/order-transfer';
 import { useApp, parsePiasters } from '../../state/app-context';
 import { colors, spacing } from '../../theme';

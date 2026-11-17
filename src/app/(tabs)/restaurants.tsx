@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { AdminAccountActions } from '../../components/admin-account-actions';
 import { ActionButton, Body, Field, Heading, Notice, Page, Section, SegmentedSwitch } from '../../components/ui';
+import { Alert } from '../../lib/platform-alert';
 import { isBackendConfigured } from '../../lib/supabase';
 import { useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';

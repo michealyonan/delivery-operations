@@ -60,6 +60,8 @@ interface AppContextValue {
   profile: AppProfile | null;
   isLoading: boolean;
   isDemo: boolean;
+  hasLoadedData: boolean;
+  refreshError: string | null;
   orders: DeliveryOrder[];
   orderAssignmentAttempts: OrderAssignmentAttempt[];
   orderReturns: OrderReturn[];
@@ -180,6 +182,19 @@ function assertBackend() {
     throw new Error('يلزم ربط قاعدة البيانات قبل حفظ بيانات حقيقية.');
   }
   return supabase;
+}
+
+function getRefreshErrorMessage(error: unknown) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const code = error.code;
+    if (code === '42501' || code === 'PGRST301') {
+      return 'تعذر تحميل بيانات الحساب بسبب صلاحيات قاعدة البيانات. تحقق من صلاحيات الإدارة ثم أعد المحاولة.';
+    }
+  }
+  if (error instanceof TypeError) {
+    return 'تعذر الاتصال بالخادم. تحقق من الإنترنت وإعدادات الاتصال ثم أعد المحاولة.';
+  }
+  return 'تعذر تحميل بيانات الحساب كاملة. فشل التحميل لا يعني حذف البيانات؛ أعد المحاولة ولا تُنشئ الحسابات الموجودة من جديد.';
 }
 
 async function getAccountFunctionErrorMessage(error: unknown) {
@@ -400,6 +415,8 @@ export function AppProvider({ children }: PropsWithChildren) {
   const courierPhotoUrlCache = useRef(new Map<string, { url: string; expiresAt: number }>());
   const [isLoading, setIsLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  const [hasLoadedData, setHasLoadedData] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [orderAssignmentAttempts, setOrderAssignmentAttempts] = useState<OrderAssignmentAttempt[]>([]);
   const [orderReturns, setOrderReturns] = useState<OrderReturn[]>([]);
@@ -506,7 +523,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     return base;
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refreshData = useCallback(async () => {
     if (isDemo) {
       setOrders(cloneDemoOrders());
       setOrderTransferRequests([]);
@@ -835,6 +852,18 @@ export function AppProvider({ children }: PropsWithChildren) {
     );
   }, [isDemo, profile]);
 
+  const refresh = useCallback(async () => {
+    if (!profile && !isDemo) return;
+    try {
+      await refreshData();
+      setHasLoadedData(true);
+      setRefreshError(null);
+    } catch (error) {
+      setRefreshError(getRefreshErrorMessage(error));
+      throw error;
+    }
+  }, [isDemo, profile, refreshData]);
+
   useEffect(() => {
     let active = true;
     const initialize = async () => {
@@ -980,6 +1009,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (!data.user) throw new Error('لم يتم العثور على حساب بعد تسجيل الدخول.');
       const nextProfile = await loadProfile(data.user.id);
       setIsDemo(false);
+      setHasLoadedData(false);
+      setRefreshError(null);
       setProfile(nextProfile);
       return nextProfile.role;
     },
@@ -988,6 +1019,8 @@ export function AppProvider({ children }: PropsWithChildren) {
 
   const signInDemo = useCallback((role: UserRole) => {
     setIsDemo(true);
+    setHasLoadedData(false);
+    setRefreshError(null);
     setProfile(demoProfile(role));
     setOrders(cloneDemoOrders());
     setOrderAssignmentAttempts([]);
@@ -1028,6 +1061,8 @@ export function AppProvider({ children }: PropsWithChildren) {
     }
     setProfile(null);
     setIsDemo(false);
+    setHasLoadedData(false);
+    setRefreshError(null);
     setOrders([]);
     setOrderAssignmentAttempts([]);
     setOrderReturns([]);
@@ -2987,6 +3022,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       profile,
       isLoading,
       isDemo,
+      hasLoadedData,
+      refreshError,
       orders,
       orderAssignmentAttempts,
       orderReturns,
@@ -3047,6 +3084,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       profile,
       isLoading,
       isDemo,
+      hasLoadedData,
+      refreshError,
       orders,
       orderAssignmentAttempts,
       orderReturns,

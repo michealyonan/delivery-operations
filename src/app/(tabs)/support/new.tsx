@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Section, Page } from '../../../components/ui';
+import { Alert } from '../../../lib/platform-alert';
 import { useApp } from '../../../state/app-context';
 import { colors, spacing } from '../../../theme';
 

@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { useState } from 'react';
-import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AdminAccountActions } from '../../components/admin-account-actions';
 import { BreakCountdown } from '../../components/break-countdown';
 import { ActionButton, Body, Field, Heading, Notice, Page, Section, SegmentedSwitch } from '../../components/ui';
+import { Alert } from '../../lib/platform-alert';
 import { isBackendConfigured } from '../../lib/supabase';
 import { useApp, toImagePickerInput } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
@@ -25,6 +26,7 @@ export default function CouriersScreen() {
   const {
     couriers,
     createCourier,
+    hasLoadedData,
     isDemo,
     refresh,
     approveCourierShiftClose,
@@ -45,6 +47,7 @@ export default function CouriersScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [breakSettingBusy, setBreakSettingBusy] = useState(false);
   const [breakSettingError, setBreakSettingError] = useState('');
+  const [refreshBusy, setRefreshBusy] = useState(false);
   const [activeSection, setActiveSection] = useState<'accounts' | 'create'>('accounts');
 
   const openCourier = (courierId: number) => {
@@ -60,6 +63,17 @@ export default function CouriersScreen() {
       setBreakSettingError(error instanceof Error ? error.message : 'تعذر تحديث إعدادات البريك.');
     } finally {
       setBreakSettingBusy(false);
+    }
+  };
+
+  const reloadCouriers = async () => {
+    setRefreshBusy(true);
+    try {
+      await refresh();
+    } catch (error) {
+      console.error('تعذر تحديث قائمة المندوبين:', error);
+    } finally {
+      setRefreshBusy(false);
     }
   };
 
@@ -276,15 +290,20 @@ export default function CouriersScreen() {
           </ActionButton>
           {breakSettingError ? <Notice tone="danger">{breakSettingError}</Notice> : null}
           <ActionButton
-            onPress={() => {
-              refresh().catch((error: unknown) =>
-                Alert.alert('تعذر تحديث القائمة', error instanceof Error ? error.message : 'حاول مرة أخرى.'),
-              );
-            }}
+            disabled={refreshBusy}
+            loading={refreshBusy}
+            onPress={() => void reloadCouriers()}
             tone="outline"
           >
             تحديث القائمة
           </ActionButton>
+          {hasLoadedData && couriers.length === 0 ? (
+            <Notice tone="warning">
+              لا توجد حسابات مندوبين ظاهرة حاليًا. إذا كان المندوب يستطيع تسجيل الدخول أو كان مسجلًا
+              من قبل، لا تُنشئ حسابًا جديدًا؛ أعد تحميل البيانات وراجع اتصال قاعدة البيانات وصلاحيات
+              الإدارة.
+            </Notice>
+          ) : null}
           {couriers.map((courier) => (
             <View key={courier.id} style={styles.listRow}>
               <Pressable accessibilityRole="button" onPress={() => openCourier(courier.id)}>

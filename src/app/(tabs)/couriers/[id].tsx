@@ -1,10 +1,11 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Platform, StyleSheet, View } from 'react-native';
+import { Image, Platform, StyleSheet, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Section, Subheading } from '../../../components/ui';
 import { BreakCountdown } from '../../../components/break-countdown';
+import { Alert } from '../../../lib/platform-alert';
 import { useApp, toImagePickerInput } from '../../../state/app-context';
 import { colors } from '../../../theme';
 import type { CourierPrivateDetails } from '../../../types';

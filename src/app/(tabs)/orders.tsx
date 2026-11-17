@@ -1,9 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, StatusTag } from '../../components/ui';
+import { Alert } from '../../lib/platform-alert';
 import { parsePiasters, useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { DeliveryOrder } from '../../types';

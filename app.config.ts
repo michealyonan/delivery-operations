@@ -33,7 +33,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: 'إدارة التوصيل',
+    name: 'دليفرى',
     slug: 'delivery-operations',
     orientation: 'portrait',
     userInterfaceStyle: 'light',
