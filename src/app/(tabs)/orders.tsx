@@ -170,7 +170,7 @@ function isEligibleCourier(courier: ReturnType<typeof useApp>['couriers'][number
 }
 
 export default function OrdersScreen() {
-  const { profile, orders, isDemo } = useApp();
+  const { profile, orders, orderReturns, isDemo } = useApp();
   const [showCourierHistory, setShowCourierHistory] = useState(false);
   const visibleOrders = orders.filter((order) => {
     if (profile?.role === 'restaurant') return order.restaurantId === profile.restaurantId;
@@ -178,7 +178,9 @@ export default function OrdersScreen() {
       return (
         order.courierId === profile.courierId &&
         (showCourierHistory
-          ? order.status === 'delivered'
+          ? order.status === 'delivered' ||
+            (order.status === 'cancelled' &&
+              orderReturns.some((orderReturn) => orderReturn.orderId === order.id))
           : ['assigned', 'accepted', 'picked_up'].includes(order.status))
       );
     }

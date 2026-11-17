@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Heading, Notice, Page } from '../../../components/ui';
+import { BreakCountdown } from '../../../components/break-countdown';
 import { isBackendConfigured, supabase } from '../../../lib/supabase';
 import { useApp } from '../../../state/app-context';
 import { colors, spacing } from '../../../theme';
@@ -73,6 +74,7 @@ export default function SupportScreen() {
     supportRevision,
     loadSupportConversations,
     requestCourierBreak,
+    endCourierBreak,
     refresh,
   } = useApp();
   const staff = profile?.role === 'admin' || profile?.role === 'support';
@@ -82,6 +84,7 @@ export default function SupportScreen() {
   const [breakBusy, setBreakBusy] = useState<number | null>(null);
   const [breakError, setBreakError] = useState('');
   const [breakMessage, setBreakMessage] = useState('');
+  const [endingBreak, setEndingBreak] = useState(false);
   const [clock, setClock] = useState(0);
 
   useEffect(() => {
@@ -172,6 +175,19 @@ export default function SupportScreen() {
       setBreakBusy(null);
     }
   };
+  const endOwnBreak = async () => {
+    if (!profile?.courierId) return;
+    setBreakError('');
+    setEndingBreak(true);
+    try {
+      await endCourierBreak(profile.courierId);
+      setBreakMessage('تم فك البريك، يمكنك الرجوع للشغل.');
+    } catch (error) {
+      setBreakError(error instanceof Error ? error.message : 'تعذر فك البريك.');
+    } finally {
+      setEndingBreak(false);
+    }
+  };
 
   return (
     <Page>
@@ -213,12 +229,28 @@ export default function SupportScreen() {
       {profile?.role === 'courier' && (
         <View style={styles.breakSection}>
           <Text style={styles.breakTitle}>طلب بريك</Text>
-          {!breakRequestsEnabled ? (
+          {isOnBreak && breakUntil ? (
+            <>
+              <Notice tone={profile.breakStartedBy === 'courier' ? 'info' : 'warning'}>
+                {profile.breakStartedBy === 'courier'
+                  ? 'أنت في بريك بدأته بنفسك.'
+                  : 'أنت في بريك من الإدارة. الإدارة فقط يمكنها إرجاعك للشغل.'}
+                {' '}ينتهي {breakUntil.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}.
+              </Notice>
+              <BreakCountdown until={breakUntil.toISOString()} />
+              {profile.breakStartedBy === 'courier' ? (
+                <ActionButton
+                  disabled={endingBreak}
+                  loading={endingBreak}
+                  onPress={() => void endOwnBreak()}
+                  tone="secondary"
+                >
+                  فك البريك والرجوع للشغل
+                </ActionButton>
+              ) : null}
+            </>
+          ) : !breakRequestsEnabled ? (
             <Notice tone="warning">طلبات البريك متوقفة حاليًا من الإدارة بسبب ضغط الطلبات.</Notice>
-          ) : isOnBreak && breakUntil ? (
-            <Notice tone="info">
-              أنت في بريك حتى {breakUntil.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}.
-            </Notice>
           ) : !profile.isOnShift ? (
             <Notice>ابدأ الشيفت أولًا حتى تتمكن من طلب بريك.</Notice>
           ) : (

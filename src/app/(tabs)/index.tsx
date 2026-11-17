@@ -1,9 +1,10 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Heading, Notice, Page, Section, SegmentedSwitch, StatusTag, Subheading } from '../../components/ui';
+import { BreakCountdown } from '../../components/break-countdown';
 import { useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { DeliveryOrder } from '../../types';
@@ -42,7 +43,7 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
 }
 
 function AdminHome() {
-  const { orders, couriers, locations, isDemo, refresh, signOut, setCourierOnBreak } = useApp();
+  const { orders, couriers, locations, isDemo, refresh, signOut, setCourierOnBreak, endCourierBreak } = useApp();
   const [elapsed, setElapsed] = useState(0);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -107,6 +108,21 @@ function AdminHome() {
     } catch (error) {
       setBreakMessageTone('danger');
       setBreakMessage(error instanceof Error ? error.message : 'تعذر بدء البريك. حاول مرة أخرى.');
+    } finally {
+      setBreakBusy(false);
+    }
+  };
+  const returnCourierToWork = async () => {
+    if (!selectedCourier) return;
+    setBreakBusy(true);
+    setBreakMessage('');
+    try {
+      await endCourierBreak(selectedCourier.id);
+      setBreakMessageTone('info');
+      setBreakMessage(`تم فك بريك ${selectedCourier.fullName} وإرجاعه للشغل.`);
+    } catch (error) {
+      setBreakMessageTone('danger');
+      setBreakMessage(error instanceof Error ? error.message : 'تعذر فك البريك.');
     } finally {
       setBreakBusy(false);
     }
@@ -205,10 +221,38 @@ function AdminHome() {
         )}
         {selectedCourier ? (
           <View style={styles.courierDetails}>
-            <Subheading>{selectedCourier.fullName}</Subheading>
+            <View style={styles.courierIdentity}>
+              {selectedCourier.profilePhotoUrl ? (
+                <Image
+                  accessibilityLabel={`صورة ${selectedCourier.fullName}`}
+                  source={{ uri: selectedCourier.profilePhotoUrl }}
+                  style={styles.courierAvatar}
+                />
+              ) : (
+                <View style={styles.courierAvatarPlaceholder}>
+                  <Text style={styles.courierAvatarInitial}>
+                    {selectedCourier.fullName.trim().slice(0, 1)}
+                  </Text>
+                </View>
+              )}
+              <Subheading>{selectedCourier.fullName}</Subheading>
+            </View>
             <Text style={styles.orderInfo}>كود المندوب: {selectedCourier.code}</Text>
+            <ActionButton
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/couriers/[id]',
+                  params: { id: String(selectedCourier.id) },
+                })
+              }
+              tone="outline"
+            >
+              فتح ملف المندوب وصورته وبياناته
+            </ActionButton>
             <Text style={styles.orderInfo}>
-              الحالة: {selectedCourierOnBreak ? 'في بريك' : selectedCourier.isOnShift ? 'على الشيفت' : 'خارج الشيفت'}
+              الحالة: {selectedCourierOnBreak
+                ? selectedCourier.breakStartedBy === 'courier' ? 'في بريك بطلبه' : 'في بريك من الإدارة'
+                : selectedCourier.isOnShift ? 'على الشيفت' : 'خارج الشيفت'}
               {selectedCourier.shiftCloseRequestedAt ? ' · طلب إغلاق الشيفت بانتظار الإدارة' : ''}
             </Text>
             <Text style={styles.orderInfo}>
@@ -251,7 +295,21 @@ function AdminHome() {
               <Body>لا يوجد طلب نشط مع هذا المندوب.</Body>
             )}
             {selectedCourierOnBreak ? (
-              <Notice>البريك مستمر حتى {new Date(selectedCourier.breakUntil ?? '').toLocaleString('ar-EG')}.</Notice>
+              <>
+                <Notice tone={selectedCourier.breakStartedBy === 'courier' ? 'info' : 'warning'}>
+                  {selectedCourier.breakStartedBy === 'courier' ? 'بريك بدأه المندوب' : 'بريك من الإدارة'}
+                  {' '}حتى {new Date(selectedCourier.breakUntil ?? '').toLocaleString('ar-EG')}.
+                </Notice>
+                <BreakCountdown until={selectedCourier.breakUntil!} />
+                <ActionButton
+                  disabled={breakBusy}
+                  loading={breakBusy}
+                  onPress={() => void returnCourierToWork()}
+                  tone="secondary"
+                >
+                  فك البريك وإرجاع المندوب للشغل
+                </ActionButton>
+              </>
             ) : selectedOrder ? (
               <Notice tone="warning">حوّل الطلب أو أكمله قبل إخراج المندوب لبريك.</Notice>
             ) : selectedCourierEligible &&
@@ -396,11 +454,25 @@ function RestaurantHome() {
 }
 
 function CourierHome() {
-  const { profile, orders, isDemo, setShift } = useApp();
+  const { profile, orders, isDemo, setShift, endCourierBreak } = useApp();
   const [busy, setBusy] = useState(false);
   const [shiftError, setShiftError] = useState('');
+  const [breakBusy, setBreakBusy] = useState(false);
+  const [breakError, setBreakError] = useState('');
+  const [now, setNow] = useState<number | null>(null);
   const active = Boolean(profile?.isOnShift);
   const closeRequested = Boolean(profile?.shiftCloseRequestedAt);
+  const activeBreak = Boolean(
+    now !== null && profile?.breakUntil && new Date(profile.breakUntil).getTime() > now,
+  );
+  useEffect(() => {
+    const firstUpdate = setTimeout(() => setNow(Date.now()), 0);
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => {
+      clearTimeout(firstUpdate);
+      clearInterval(timer);
+    };
+  }, []);
   const allMyOrders = orders.filter((order) => order.courierId === profile?.courierId);
   const myOrders = allMyOrders.filter((order) =>
     ['assigned', 'accepted', 'picked_up'].includes(order.status),
@@ -423,6 +495,18 @@ function CourierHome() {
       setBusy(false);
     }
   };
+  const endOwnBreak = async () => {
+    if (!profile?.courierId) return;
+    setBreakBusy(true);
+    setBreakError('');
+    try {
+      await endCourierBreak(profile.courierId);
+    } catch (error) {
+      setBreakError(error instanceof Error ? error.message : 'تعذر فك البريك.');
+    } finally {
+      setBreakBusy(false);
+    }
+  };
 
   return (
     <Page>
@@ -431,7 +515,9 @@ function CourierHome() {
       {isDemo && <Notice tone="warning">الموقع والطلبات في هذه الشاشة بيانات تجريبية.</Notice>}
       <View style={[styles.shiftBanner, active ? styles.shiftOn : styles.shiftOff]}>
         <Subheading>
-          {closeRequested
+          {activeBreak
+            ? profile?.breakStartedBy === 'courier' ? 'أنت في بريك بطلبك' : 'أنت في بريك من الإدارة'
+            : closeRequested
             ? 'طلب إغلاق الشيفت قيد المراجعة'
             : active
               ? 'أنت على الشيفت'
@@ -447,6 +533,28 @@ function CourierHome() {
         ) : active ? (
           <Body>وقت بداية هذا الشيفت غير مسجل.</Body>
         ) : null}
+        {activeBreak && profile?.breakUntil ? (
+          <>
+            <Notice tone={profile.breakStartedBy === 'courier' ? 'info' : 'warning'}>
+              {profile.breakStartedBy === 'courier'
+                ? 'بدأت هذا البريك بنفسك ويمكنك فكّه والرجوع للشغل.'
+                : 'الإدارة أخرجتك لبريك؛ لا يمكنك فكّه بنفسك.'}
+              {' '}ينتهي {new Date(profile.breakUntil).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}.
+            </Notice>
+            <BreakCountdown until={profile.breakUntil} />
+            {profile.breakStartedBy === 'courier' ? (
+              <ActionButton
+                disabled={breakBusy}
+                loading={breakBusy}
+                onPress={() => void endOwnBreak()}
+                tone="secondary"
+              >
+                فك البريك والرجوع للشغل
+              </ActionButton>
+            ) : null}
+          </>
+        ) : null}
+        {breakError ? <Notice tone="danger">{breakError}</Notice> : null}
         {profile?.shiftEndedAt ? (
           <Body>انتهى آخر شيفت: {new Date(profile.shiftEndedAt).toLocaleString('ar-EG')}</Body>
         ) : null}
@@ -535,6 +643,17 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: colors.surfaceRaised,
   },
+  courierIdentity: { flexDirection: 'row-reverse', alignItems: 'center', gap: spacing.sm },
+  courierAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.surface },
+  courierAvatarPlaceholder: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  courierAvatarInitial: { color: colors.primary, fontSize: 20, fontWeight: '800' },
   selectedOrder: { gap: spacing.xs, paddingTop: spacing.sm },
   orderHeading: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },
   orderRow: {

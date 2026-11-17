@@ -22,7 +22,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "نستخدم الكاميرا لتوثيق إرجاع الطلب إلى المطعم.",
+          "microphonePermission": false
+        }
+      ]
     ],
     "extra": {
       "router": {

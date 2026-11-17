@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Alert, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AdminAccountActions } from '../../components/admin-account-actions';
+import { BreakCountdown } from '../../components/break-countdown';
 import { ActionButton, Body, Field, Heading, Notice, Page, Section, SegmentedSwitch } from '../../components/ui';
 import { isBackendConfigured } from '../../lib/supabase';
 import { useApp, toImagePickerInput } from '../../state/app-context';
@@ -14,7 +15,9 @@ function courierStatus(courier: Courier) {
   if (courier.isTerminated) return 'إيقاف نهائي';
   if (!courier.isActive) return 'الحساب موقوف';
   if (courier.shiftCloseRequestedAt) return 'بانتظار موافقة إغلاق الشيفت';
-  if (courier.isOnBreak) return 'في بريك';
+  if (courier.isOnBreak) {
+    return courier.breakStartedBy === 'courier' ? 'بريك بطلب المندوب' : 'بريك من الإدارة';
+  }
   return courier.isOnShift ? 'على الشيفت' : 'غير متصل';
 }
 
@@ -295,9 +298,12 @@ export default function CouriersScreen() {
                 العقد: {courier.contractStartDate} — {courier.contractEndDate}
               </Text>
               {courier.isOnBreak && courier.breakUntil ? (
-                <Text style={styles.detail}>
-                  ينتهي البريك: {new Date(courier.breakUntil).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
-                </Text>
+                <>
+                  <Text style={styles.detail}>
+                    ينتهي البريك: {new Date(courier.breakUntil).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
+                  </Text>
+                  <BreakCountdown until={courier.breakUntil} />
+                </>
               ) : null}
               <ActionButton onPress={() => openCourier(courier.id)} tone="outline">
                 فتح ملف المندوب

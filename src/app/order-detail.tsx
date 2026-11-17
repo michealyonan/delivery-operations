@@ -1,6 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import type { ImagePickerAsset } from 'expo-image-picker';
+import { Alert, Image, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../components/ui';
 import { useApp, parsePiasters } from '../state/app-context';
@@ -31,6 +33,8 @@ export default function OrderDetailScreen() {
   const {
     profile,
     orders,
+    orderAssignmentAttempts,
+    orderReturns,
     couriers,
     locations,
     isDemo,
@@ -39,8 +43,18 @@ export default function OrderDetailScreen() {
     assignOrder,
     getCourierContact,
     cancelOrder,
+    startOrderReturn,
+    completeOrderReturn,
+    confirmOrderReturn,
   } = useApp();
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
+  const orderReturn = orderReturns.find((item) => item.orderId === id);
+  const courierDidNotAccept = orderAssignmentAttempts.some(
+    (attempt) =>
+      attempt.orderId === id &&
+      attempt.courierId === profile?.courierId &&
+      attempt.status === 'not_accepted',
+  );
   const courierLocation =
     order?.courierId == null
       ? undefined
@@ -58,6 +72,8 @@ export default function OrderDetailScreen() {
   const [showCourierMap, setShowCourierMap] = useState(false);
   const [selectedCourierId, setSelectedCourierId] = useState<number | null>(null);
   const [clock, setClock] = useState(0);
+  const [returnPhoto, setReturnPhoto] = useState<ImagePickerAsset | null>(null);
+  const [returnRefundReceived, setReturnRefundReceived] = useState<boolean | null>(null);
   const deliveryFeeInput = order
     ? deliveryFeeDrafts[order.id] ??
       (order.deliveryFeePiasters == null ? '' : (order.deliveryFeePiasters / 100).toFixed(2))
@@ -179,6 +195,59 @@ export default function OrderDetailScreen() {
       { text: 'إلغاء الطلب', style: 'destructive', onPress: () => void perform() },
     ]);
   };
+  const requestOrderReturn = () => {
+    const title = 'بدء رحلة إرجاع الطلب';
+    const message = 'سيُسجل الطلب ملغيًا بسبب رفض العميل، وستظل عملية الإرجاع مفتوحة حتى يؤكد المطعم استلامه.';
+    const perform = () =>
+      run(() => startOrderReturn(order.id), 'بدأت رحلة الإرجاع. أعد الطلب للمطعم لتوثيق وصوله.');
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) void perform();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'رجوع', style: 'cancel' },
+      { text: 'بدء الإرجاع', style: 'destructive', onPress: () => void perform() },
+    ]);
+  };
+  const takeReturnPhoto = async () => {
+    try {
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ['images'],
+        quality: 0.8,
+        base64: true,
+      };
+      let result: ImagePicker.ImagePickerResult;
+      if (Platform.OS === 'web') {
+        result = await ImagePicker.launchCameraAsync(options);
+      } else {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('إذن الكاميرا مطلوب', 'اسمح باستخدام الكاميرا لتوثيق رجوع الطلب للمطعم.');
+          return;
+        }
+        result = await ImagePicker.launchCameraAsync(options);
+      }
+      if (result.canceled || !result.assets[0]) return;
+      if (result.assets[0].fileSize && result.assets[0].fileSize > 8 * 1024 * 1024) {
+        Alert.alert('الصورة كبيرة', 'اختر صورة لا يتجاوز حجمها 8 ميجابايت.');
+        return;
+      }
+      setReturnPhoto(result.assets[0]);
+    } catch (error) {
+      Alert.alert('تعذر فتح الكاميرا', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+    }
+  };
+  const submitReturnedOrder = () => {
+    if (!orderReturn || !returnPhoto || returnRefundReceived == null) {
+      Alert.alert('بيانات الإرجاع ناقصة', 'صوّر الطلب واختر هل استلمت قيمة الطلب من المطعم.');
+      return;
+    }
+    void run(async () => {
+      await completeOrderReturn(orderReturn.id, returnPhoto, returnRefundReceived);
+      setReturnPhoto(null);
+      setReturnRefundReceived(null);
+    }, 'تم تسجيل وصول الطلب للمطعم وإرسال العملية لتأكيد المطعم.');
+  };
   const feePreviewPiasters = (() => {
     if (!deliveryFeeInput.trim()) return null;
     try {
@@ -204,6 +273,11 @@ export default function OrderDetailScreen() {
         <Subheading>{order.code}</Subheading>
         <StatusTag status={order.status} />
       </View>
+      {profile?.role === 'courier' && courierDidNotAccept ? (
+        <Notice tone="warning">
+          لم تقبل الطلب خلال المهلة المحددة؛ عاد للإدارة لإعادة إسناده. يظهر هنا ضمن سجل الطلبات غير المقبولة.
+        </Notice>
+      ) : null}
       {profile?.role === 'admin' && order.assignmentExpiredAt ? (
         <Notice tone="warning">
           {`المندوب ${couriers.find((courier) => courier.id === order.lastUnacceptedCourierId)?.fullName ?? 'المسند إليه'} لم يقبل الطلب خلال 120 ثانية؛ عاد الطلب إلى الإدارة.`}
@@ -290,6 +364,104 @@ export default function OrderDetailScreen() {
         )}
         <Body>المطلوب دفعه للمطعم: {money(order.restaurantDuePiasters)}</Body>
       </Section>
+
+      {profile?.role === 'courier' && order.status === 'picked_up' ? (
+        <Section title="رفض العميل الاستلام">
+          <Notice tone="warning">
+            إذا رفض العميل الطلب بعد وصولك، ابدأ رحلة الإرجاع وأعده للمطعم بدل تسجيله كطلب تم توصيله.
+          </Notice>
+          <ActionButton
+            disabled={busy}
+            loading={busy}
+            onPress={requestOrderReturn}
+            tone="danger"
+          >
+            بدء رحلة الإرجاع للمطعم
+          </ActionButton>
+        </Section>
+      ) : null}
+
+      {orderReturn ? (
+        <Section title="رحلة إرجاع الطلب">
+          <Notice tone={orderReturn.status === 'closed' ? 'info' : 'warning'}>
+            {orderReturn.status === 'in_transit'
+              ? 'الطلب ملغي بسبب رفض العميل؛ المندوب في طريقه لإعادته للمطعم.'
+              : orderReturn.status === 'returned_by_courier'
+                ? 'وصل الطلب للمطعم، والعملية بانتظار تأكيد استلام المطعم.'
+                : 'أكد المطعم استلام الطلب وأُغلقت عملية الإرجاع.'}
+          </Notice>
+          {orderReturn.status !== 'in_transit' ? (
+            <>
+              {orderReturn.photoUrl ? (
+                <Image
+                  accessibilityLabel="صورة الطلب بعد إرجاعه للمطعم"
+                  source={{ uri: orderReturn.photoUrl }}
+                  style={styles.returnPhoto}
+                  resizeMode="cover"
+                />
+              ) : null}
+              <Body>
+                {orderReturn.courierReceivedRestaurantRefund
+                  ? 'استلم المندوب قيمة الطلب التي دفعها للمطعم.'
+                  : orderReturn.courierReceivedRestaurantRefund === false
+                    ? 'لم يستلم المندوب قيمة الطلب من المطعم.'
+                    : 'لم يسجل المندوب استلام قيمة الطلب بعد.'}
+              </Body>
+            </>
+          ) : null}
+          {profile?.role === 'courier' && orderReturn.status === 'in_transit' ? (
+            <>
+              <Body>عند وصولك للمطعم، صوّر الطلب واختر هل أعاد لك المطعم قيمة الطلب التي دفعتها.</Body>
+              <ActionButton disabled={busy} onPress={() => void takeReturnPhoto()} tone="outline">
+                {returnPhoto ? 'التقاط صورة أخرى للطلب' : 'تصوير الطلب في المطعم'}
+              </ActionButton>
+              {returnPhoto ? (
+                <Image
+                  accessibilityLabel="معاينة صورة المرتجع"
+                  source={{ uri: returnPhoto.uri }}
+                  style={styles.returnPhoto}
+                  resizeMode="cover"
+                />
+              ) : null}
+              <Body>هل استلمت من المطعم قيمة الطلب التي دفعتها؟</Body>
+              <ActionButton
+                onPress={() => setReturnRefundReceived(true)}
+                tone={returnRefundReceived === true ? 'secondary' : 'outline'}
+              >
+                نعم، استلمت قيمة الطلب
+              </ActionButton>
+              <ActionButton
+                onPress={() => setReturnRefundReceived(false)}
+                tone={returnRefundReceived === false ? 'secondary' : 'outline'}
+              >
+                لا، لم أستلم قيمة الطلب
+              </ActionButton>
+              <ActionButton
+                disabled={busy || !returnPhoto || returnRefundReceived == null}
+                loading={busy}
+                onPress={submitReturnedOrder}
+              >
+                تم إرجاع الطلب للمطعم
+              </ActionButton>
+            </>
+          ) : null}
+          {profile?.role === 'restaurant' && orderReturn.status === 'returned_by_courier' ? (
+            <ActionButton
+              disabled={busy}
+              loading={busy}
+              onPress={() =>
+                run(
+                  () => confirmOrderReturn(orderReturn.id),
+                  'تم تأكيد استلام الطلب وإغلاق عملية الإرجاع.',
+                )
+              }
+              tone="secondary"
+            >
+              تأكيد استلام المرتجع وإغلاق العملية
+            </ActionButton>
+          ) : null}
+        </Section>
+      ) : null}
 
       {profile?.role === 'restaurant' && contact && (
         <Section title="بيانات المندوب">
@@ -493,4 +665,10 @@ const styles = StyleSheet.create({
   itemText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 23, textAlign: 'right', writingDirection: 'rtl' },
   itemDetails: { flex: 1, gap: 4 },
   itemSubtext: { color: colors.muted, fontSize: 12, textAlign: 'right', writingDirection: 'rtl' },
+  returnPhoto: {
+    width: '100%',
+    height: 220,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceRaised,
+  },
 });

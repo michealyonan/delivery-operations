@@ -1,6 +1,9 @@
 export type UserRole = 'admin' | 'restaurant' | 'courier' | 'support';
 
 export type SupportConversationStatus = 'open' | 'in_progress' | 'resolved';
+export type BreakStartedBy = 'admin' | 'courier';
+export type OrderReturnStatus = 'in_transit' | 'returned_by_courier' | 'closed';
+export type OrderAssignmentAttemptStatus = 'awaiting' | 'not_accepted' | 'accepted';
 
 export type OrderStatus =
   | 'pending'
@@ -29,6 +32,7 @@ export interface AppProfile {
   shiftCloseRequestedAt?: string;
   shiftEndedAt?: string;
   breakUntil?: string;
+  breakStartedBy?: BreakStartedBy;
   contractStartDate?: string;
   contractEndDate?: string;
   isTerminated?: boolean;
@@ -55,6 +59,7 @@ export interface Courier {
   fullName: string;
   phone: string;
   email: string;
+  profilePhotoUrl?: string;
   nationalId?: string;
   address?: string;
   idCardPath?: string;
@@ -62,6 +67,7 @@ export interface Courier {
   isOnShift: boolean;
   isOnBreak: boolean;
   breakUntil?: string;
+  breakStartedBy?: BreakStartedBy;
   shiftStartedAt?: string;
   shiftCloseRequestedAt?: string;
   shiftEndedAt?: string;
@@ -114,6 +120,30 @@ export interface DeliveryOrder {
   acceptedAt?: string;
   deliveredAt?: string;
   cancelledAt?: string;
+}
+
+export interface OrderReturn {
+  id: string;
+  orderId: string;
+  courierId: number;
+  restaurantId: number;
+  status: OrderReturnStatus;
+  reason: string;
+  startedAt: string;
+  returnedAt?: string;
+  courierReceivedRestaurantRefund?: boolean;
+  photoUrl?: string;
+}
+
+export interface OrderAssignmentAttempt {
+  id: string;
+  orderId: string;
+  orderCode: string;
+  courierId: number;
+  assignedAt: string;
+  status: OrderAssignmentAttemptStatus;
+  acceptedAt?: string;
+  resolvedAt?: string;
 }
 
 export interface OrderLineItem {

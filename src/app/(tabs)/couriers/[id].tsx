@@ -1,9 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Platform, StyleSheet } from 'react-native';
+import { Alert, Image, Platform, StyleSheet, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../../components/ui';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, Subheading } from '../../../components/ui';
+import { BreakCountdown } from '../../../components/break-countdown';
 import { useApp, toImagePickerInput } from '../../../state/app-context';
 import { colors } from '../../../theme';
 import type { CourierPrivateDetails } from '../../../types';
@@ -22,6 +23,7 @@ export default function CourierDetailsScreen() {
     isDemo,
     getCourierPrivateDetails,
     approveCourierShiftClose,
+    endCourierBreak,
     setCourierActive,
     renewCourierContract,
     terminateCourier,
@@ -222,6 +224,25 @@ export default function CourierDetailsScreen() {
         <Notice>جارٍ تحميل بيانات الملف الخاصة...</Notice>
       ) : details ? (
         <>
+          <View style={styles.profileHeader}>
+            {details.selfieUrl || courier.profilePhotoUrl ? (
+              <Image
+                accessibilityLabel={`صورة ${details.fullName}`}
+                source={{ uri: details.selfieUrl ?? courier.profilePhotoUrl }}
+                style={styles.profilePhoto}
+              />
+            ) : (
+              <View style={styles.profilePhotoPlaceholder}>
+                <Body>لا توجد صورة</Body>
+              </View>
+            )}
+            <View style={styles.profileSummary}>
+              <Subheading>{details.fullName}</Subheading>
+              <Body>رقم المندوب الثابت: {details.code}</Body>
+              <Body>{details.phone}</Body>
+              <Body>{details.email}</Body>
+            </View>
+          </View>
           <Section title="حالة الحساب والعقد">
             <Body>
               الحالة: {isTerminated
@@ -230,6 +251,8 @@ export default function CourierDetailsScreen() {
                   ? 'موقوف مؤقتًا'
                   : courier.shiftCloseRequestedAt
                     ? 'بانتظار موافقة إغلاق الشيفت'
+                    : courier.isOnBreak
+                      ? courier.breakStartedBy === 'courier' ? 'بريك بطلب المندوب' : 'بريك من الإدارة'
                     : details.isOnShift
                       ? 'على الشيفت'
                       : 'غير متصل'}
@@ -269,10 +292,32 @@ export default function CourierDetailsScreen() {
             ) : null}
             <Body>بداية العقد: {formatDate(details.contractStartDate)}</Body>
             <Body>نهاية العقد: {formatDate(details.contractEndDate)}</Body>
-            {details.breakUntil && new Date(details.breakUntil) > new Date() ? (
-              <Body>
-                بريك حتى {new Date(details.breakUntil).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}
-              </Body>
+            {courier.breakUntil && new Date(courier.breakUntil) > new Date() ? (
+              <>
+                <Notice tone={courier.breakStartedBy === 'courier' ? 'info' : 'warning'}>
+                  {courier.breakStartedBy === 'courier' ? 'بريك بطلب المندوب' : 'بريك من الإدارة'} حتى{' '}
+                  {new Date(courier.breakUntil).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}.
+                </Notice>
+                <BreakCountdown until={courier.breakUntil} />
+                <ActionButton
+                  disabled={busyAction !== ''}
+                  loading={busyAction === 'end-break'}
+                  onPress={async () => {
+                    setErrorMessage('');
+                    setBusyAction('end-break');
+                    try {
+                      await endCourierBreak(courierId);
+                    } catch (error) {
+                      setErrorMessage(error instanceof Error ? error.message : 'تعذر فك البريك.');
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                  tone="secondary"
+                >
+                  فك البريك وإرجاع المندوب للشغل
+                </ActionButton>
+              </>
             ) : null}
             {isExpired && !isTerminated ? (
               <Notice tone="warning">انتهى العقد؛ لن يستقبل المندوب طلبات حتى تجديده.</Notice>
@@ -424,4 +469,27 @@ const styles = StyleSheet.create({
     borderRadius: 60,
     backgroundColor: colors.surfaceRaised,
   },
+  profileHeader: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 14,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceRaised,
+  },
+  profilePhoto: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: colors.surface,
+  },
+  profilePhotoPlaceholder: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  profileSummary: { flex: 1, gap: 5 },
 });

@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -7,13 +8,31 @@ import { useApp } from '../../state/app-context';
 import { colors } from '../../theme';
 
 export default function TabLayout() {
-  const { profile, couriers } = useApp();
+  const { profile, couriers, orderAssignmentAttempts, orderReturns } = useApp();
   const insets = useSafeAreaInsets();
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const firstUpdate = setTimeout(() => setNow(Date.now()), 0);
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => {
+      clearTimeout(firstUpdate);
+      clearInterval(timer);
+    };
+  }, []);
   if (!profile) return <Redirect href="/login" />;
 
   const admin = profile.role === 'admin';
   const supportOnly = profile.role === 'support';
   const pendingShiftCloseCount = couriers.filter((courier) => courier.shiftCloseRequestedAt).length;
+  const activeBreakCount = couriers.filter(
+    (courier) => now !== null && courier.breakUntil && new Date(courier.breakUntil).getTime() > now,
+  ).length;
+  const openReturnCount = orderReturns.filter((orderReturn) => orderReturn.status !== 'closed').length;
+  const unacceptedCount = orderAssignmentAttempts.filter(
+    (attempt) =>
+      (attempt.status === 'awaiting' || attempt.status === 'not_accepted') &&
+      (admin || attempt.courierId === profile.courierId),
+  ).length;
 
   return (
     <Tabs
@@ -59,6 +78,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="unaccepted-orders"
+        options={{
+          title: 'عدم القبول',
+          href: admin || profile.role === 'courier' ? undefined : null,
+          tabBarBadge: unacceptedCount > 0 ? unacceptedCount : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="clipboard-alert-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="payments"
         options={{
           title: 'الدفعات',
@@ -76,6 +106,28 @@ export default function TabLayout() {
           tabBarBadge: admin && pendingShiftCloseCount > 0 ? pendingShiftCloseCount : undefined,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="account-clock-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="break-returns"
+        options={{
+          title: 'فك البريكات',
+          href: admin ? undefined : null,
+          tabBarBadge: admin && activeBreakCount > 0 ? activeBreakCount : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="account-arrow-left-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="return-operations"
+        options={{
+          title: 'المرتجعات',
+          href: admin ? undefined : null,
+          tabBarBadge: admin && openReturnCount > 0 ? openReturnCount : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="keyboard-return" color={String(color)} size={size} />
           ),
         }}
       />
