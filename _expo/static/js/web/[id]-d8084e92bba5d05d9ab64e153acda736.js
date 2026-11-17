@@ -1,0 +1,1 @@
+__d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"default",{enumerable:!0,get:function(){return u}});var t=r(d[0]),n=r(d[1]);function u(){const u=(0,t.useLocalSearchParams)().id,c=Array.isArray(u)?u[0]:u;return(0,n.jsx)(t.Redirect,{href:{pathname:'/(tabs)/order-detail',params:{id:String(c??'')}}})}},785,[790,6]);
