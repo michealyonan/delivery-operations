@@ -165,7 +165,7 @@ export default function SupportConversationScreen() {
           onPress={() =>
             conversation.relatedOrderId &&
             router.push({
-              pathname: '/orders/[id]',
+              pathname: '/order-detail',
               params: { id: conversation.relatedOrderId },
             })
           }
@@ -211,7 +211,13 @@ export default function SupportConversationScreen() {
                 style={[styles.messageRow, own ? styles.ownRow : styles.otherRow]}
               >
                 <View style={[styles.bubble, own ? styles.ownBubble : styles.otherBubble]}>
-                  {!own && <Text style={styles.sender}>{item.senderName}</Text>}
+                  {!own ? (
+                    <Text style={styles.sender}>
+                      {item.senderRole === 'support'
+                        ? conversation?.assignedName ?? 'موظف الدعم'
+                        : item.senderName}
+                    </Text>
+                  ) : null}
                   <Text style={[styles.messageText, own && styles.ownMessageText]}>
                     {item.body}
                   </Text>
@@ -231,28 +237,29 @@ export default function SupportConversationScreen() {
         </View>
       )}
 
-      {conversation?.status === 'resolved' && !staff && (
-        <Notice>تم حل المشكلة. أرسل رسالة جديدة لإعادة فتح المحادثة.</Notice>
+      {conversation?.status === 'resolved' && !staff ? (
+        <Notice>تم حل المشكلة وإغلاق المحادثة. لا يمكن إرسال رسائل جديدة.</Notice>
+      ) : (
+        <View style={styles.composer}>
+          <Field
+            accessibilityLabel="اكتب رسالة الدعم"
+            editable={!sending}
+            label="رسالتك"
+            maxLength={4000}
+            multiline
+            onChangeText={setMessage}
+            placeholder="اكتب تفاصيل أو ردًا..."
+            value={message}
+          />
+          <ActionButton
+            disabled={!message.trim() || Boolean(staff && !canWork)}
+            loading={sending}
+            onPress={send}
+          >
+            إرسال الرسالة
+          </ActionButton>
+        </View>
       )}
-      <View style={styles.composer}>
-        <Field
-          accessibilityLabel="اكتب رسالة الدعم"
-          editable={!sending}
-          label="رسالتك"
-          maxLength={4000}
-          multiline
-          onChangeText={setMessage}
-          placeholder="اكتب تفاصيل أو ردًا..."
-          value={message}
-        />
-        <ActionButton
-          disabled={!message.trim() || Boolean(staff && !canWork)}
-          loading={sending}
-          onPress={send}
-        >
-          إرسال الرسالة
-        </ActionButton>
-      </View>
     </Page>
   );
 }

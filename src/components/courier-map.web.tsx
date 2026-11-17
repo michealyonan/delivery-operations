@@ -18,13 +18,17 @@ export default function CourierMap({
   couriers,
   locations,
   clock,
+  height = 280,
+  onCourierPress,
 }: {
   couriers: Courier[];
   locations: CourierLocation[];
   clock: number;
+  height?: number;
+  onCourierPress?: (courierId: number) => void;
 }) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const [mapSize, setMapSize] = useState({ width: 720, height: 280 });
+  const [mapSize, setMapSize] = useState({ width: 720, height });
 
   useEffect(() => {
     const element = mapRef.current;
@@ -92,10 +96,10 @@ export default function CourierMap({
   return (
     <div
       ref={mapRef}
-      role="img"
+      role={onCourierPress ? 'group' : 'img'}
       aria-label="خريطة مواقع المندوبين"
       style={{
-        height: 280,
+        height,
         position: 'relative',
         overflow: 'hidden',
         borderRadius: 16,
@@ -121,9 +125,12 @@ export default function CourierMap({
         const courier = couriers.find((item) => item.id === location.courierId);
         const stale = clock - new Date(location.recordedAt).getTime() > 120_000;
         return (
-          <div
+          <button
             key={location.courierId}
+            type="button"
             title={`${courier?.fullName ?? 'مندوب'} · ${stale ? 'آخر موقع قديم' : 'موقع حديث'}`}
+            aria-label={`اختيار ${courier?.fullName ?? 'مندوب'}`}
+            onClick={() => onCourierPress?.(location.courierId)}
             style={{
               position: 'absolute',
               left,
@@ -135,6 +142,8 @@ export default function CourierMap({
               backgroundColor: stale ? '#b7791f' : '#167c72',
               boxShadow: '0 2px 6px rgba(0,0,0,.35)',
               transform: 'translate(-50%, -50%)',
+              padding: 0,
+              cursor: onCourierPress ? 'pointer' : 'default',
             }}
           />
         );

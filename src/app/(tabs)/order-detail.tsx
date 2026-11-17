@@ -1,0 +1,462 @@
+import { router, useLocalSearchParams } from 'expo-router';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
+
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
+import { useApp, parsePiasters } from '../../state/app-context';
+import { colors, spacing } from '../../theme';
+
+const CourierMap = lazy(() => import('../../components/courier-map'));
+const googleMapsKeyConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY);
+
+function money(piasters: number | undefined) {
+  return `${((piasters ?? 0) / 100).toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م`;
+}
+
+export default function OrderDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const {
+    profile,
+    orders,
+    couriers,
+    locations,
+    isDemo,
+    acceptOrder,
+    advanceOrder,
+    assignOrder,
+    getCourierContact,
+    cancelOrder,
+  } = useApp();
+  const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
+  const courierLocation =
+    order?.courierId == null
+      ? undefined
+      : locations.find((location) => location.courierId === order.courierId);
+  const assignedCourier =
+    order?.courierId == null
+      ? undefined
+      : couriers.find((courier) => courier.id === order.courierId);
+  const [contactResult, setContactResult] = useState<{
+    orderId: string;
+    contact: { name: string; phone: string } | null;
+  } | null>(null);
+  const [deliveryFeeDrafts, setDeliveryFeeDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [showCourierMap, setShowCourierMap] = useState(false);
+  const [selectedCourierId, setSelectedCourierId] = useState<number | null>(null);
+  const [clock, setClock] = useState(0);
+  const deliveryFeeInput = order
+    ? deliveryFeeDrafts[order.id] ??
+      (order.deliveryFeePiasters == null ? '' : (order.deliveryFeePiasters / 100).toFixed(2))
+    : '';
+  const updateDeliveryFeeInput = (value: string) => {
+    if (order) setDeliveryFeeDrafts((current) => ({ ...current, [order.id]: value }));
+  };
+
+  useEffect(() => {
+    const firstTick = setTimeout(() => setClock(Date.now()), 0);
+    const interval = setInterval(() => setClock(Date.now()), 30_000);
+    return () => {
+    clearTimeout(firstTick);
+    clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (profile?.role === 'restaurant' && order && ['accepted', 'picked_up', 'delivered'].includes(order.status)) {
+      getCourierContact(order.id)
+        .then((value) => {
+          if (active) setContactResult({ orderId: order.id, contact: value });
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            Alert.alert('تعذر تحميل بيانات المندوب', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+          }
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [getCourierContact, order, profile?.role]);
+  const contact =
+    contactResult && order && contactResult.orderId === order.id
+      ? contactResult.contact
+      : null;
+  if (!order) {
+    return (
+      <Page>
+        <ActionButton onPress={() => router.replace('/(tabs)/orders')} tone="outline">
+          رجوع للخلف
+        </ActionButton>
+        <Heading>الطلب غير موجود</Heading>
+      </Page>
+    );
+  }
+
+  const run = async (action: () => Promise<void>, success?: string) => {
+    setBusy(true);
+    try {
+      await action();
+      if (success) Alert.alert('تم', success);
+    } catch (error) {
+      Alert.alert('تعذر تنفيذ الإجراء', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openRestaurantMap = async () => {
+    const query =
+      order.restaurantLatitude != null && order.restaurantLongitude != null
+        ? `${order.restaurantLatitude},${order.restaurantLongitude}`
+        : `${order.restaurantName} ${order.restaurantAddress}`;
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    await Linking.openURL(url);
+  };
+
+  const openCourierMap = async () => {
+    if (!courierLocation) {
+      Alert.alert('موقع المندوب غير متاح', 'لم يرسل المندوب موقعه حتى الآن.');
+      return;
+    }
+    const query = `${courierLocation.latitude},${courierLocation.longitude}`;
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    await Linking.openURL(url);
+  };
+
+  const assignToCourier = (courierId: number) => {
+    let feePiasters: number | undefined;
+    if (order.status === 'pending') {
+      try {
+        feePiasters = deliveryFeeInput.trim()
+          ? parsePiasters(deliveryFeeInput)
+          : order.deliveryFeePiasters;
+        if (feePiasters == null) {
+          throw new Error('أدخل رسوم التوصيل لهذا الطلب قبل إرساله.');
+        }
+      } catch (error) {
+        Alert.alert('رسوم غير صحيحة', error instanceof Error ? error.message : 'راجع المبلغ.');
+        return;
+      }
+    }
+    void run(
+      () => assignOrder(order.id, courierId, feePiasters),
+      `${order.courierId ? 'تم تحويل' : 'تم إرسال'} الطلب مع رسوم التوصيل إلى ${
+        couriers.find((courier) => courier.id === courierId)?.fullName ?? 'المندوب'
+      }. سيؤكد المندوب استلامه قبل إكمال التوصيل.`,
+    );
+  };
+  const deliverOrder = () =>
+    run(async () => {
+      await advanceOrder(order.id, 'delivered');
+      router.replace('/(tabs)/orders');
+    }, 'تم تسجيل توصيل الطلب.');
+  const requestCancelOrder = () => {
+    const title = 'إلغاء الطلب';
+    const message = 'سيتم إلغاء الطلب وإبلاغ المطعم من خلال تحديث حالته. لا يمكن التراجع عن الإلغاء.';
+    const perform = () =>
+      run(() => cancelOrder(order.id), 'تم إلغاء الطلب.');
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${title}\n\n${message}`)) void perform();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'رجوع', style: 'cancel' },
+      { text: 'إلغاء الطلب', style: 'destructive', onPress: () => void perform() },
+    ]);
+  };
+  const feePreviewPiasters = (() => {
+    if (!deliveryFeeInput.trim()) return null;
+    try {
+      return parsePiasters(deliveryFeeInput);
+    } catch {
+      return null;
+    }
+  })();
+  const onShiftCouriers = couriers.filter(
+    (courier) => courier.isActive && courier.isOnShift && !courier.isTerminated,
+  );
+  const onShiftCourierIds = new Set(onShiftCouriers.map((courier) => courier.id));
+  const onShiftLocations = locations.filter((location) => onShiftCourierIds.has(location.courierId));
+
+  return (
+    <Page>
+      <ActionButton onPress={() => router.replace('/(tabs)/orders')} tone="outline">
+        رجوع للخلف
+      </ActionButton>
+      <Heading>تفاصيل الطلب</Heading>
+      {isDemo && <Notice tone="warning">بيانات توضيحية فقط.</Notice>}
+      <View style={styles.titleRow}>
+        <Subheading>{order.code}</Subheading>
+        <StatusTag status={order.status} />
+      </View>
+      {profile?.role === 'admin' && order.assignmentExpiredAt ? (
+        <Notice tone="warning">
+          {`المندوب ${couriers.find((courier) => courier.id === order.lastUnacceptedCourierId)?.fullName ?? 'المسند إليه'} لم يقبل الطلب خلال 120 ثانية؛ عاد الطلب إلى الإدارة.`}
+        </Notice>
+      ) : null}
+      {profile?.role === 'admin' && order.status === 'pending' ? (
+        <ActionButton disabled={busy} loading={busy} onPress={requestCancelOrder} tone="danger">
+          إلغاء الطلب قبل إسناده للمندوب
+        </ActionButton>
+      ) : null}
+
+      <Section title="المطعم">
+        <Body>{order.restaurantName}</Body>
+        <Body>{order.restaurantAddress || 'لم يُسجل عنوان المطعم بعد.'}</Body>
+        <ActionButton onPress={() => run(openRestaurantMap)} tone="outline">
+          عرض موقع المطعم في الخرائط
+        </ActionButton>
+        {order.courierId != null ? (
+          <>
+            <ActionButton
+              disabled={!courierLocation}
+              onPress={() => run(openCourierMap)}
+              tone="outline"
+            >
+              عرض موقع المندوب في الخرائط
+            </ActionButton>
+            {!courierLocation ? (
+              <Notice>موقع المندوب غير متاح حاليًا؛ سيظهر بعد أن يبدأ مشاركة موقعه.</Notice>
+            ) : null}
+          </>
+        ) : null}
+      </Section>
+
+      <Section title="العميل">
+        <Body>{order.customerName}</Body>
+        <Body>{order.customerPhone}</Body>
+        <Body>{order.customerAddress}</Body>
+      </Section>
+
+      <Section title="أصناف الطلب">
+        {order.lineItems?.length
+          ? order.lineItems.map((item, index) => (
+              <View key={item.id} style={styles.itemRow}>
+                <Text style={styles.itemIndex}>{index + 1}</Text>
+                <View style={styles.itemDetails}>
+                  <Text style={styles.itemText}>{item.name} × {item.quantity}</Text>
+                  <Text style={styles.itemSubtext}>
+                    {money(item.unitPricePiasters)} للصنف · الإجمالي {money(item.lineTotalPiasters)}
+                  </Text>
+                </View>
+              </View>
+            ))
+          : order.itemsText.split(/\r?\n/).filter(Boolean).map((item, index) => (
+              <View key={`${index}-${item}`} style={styles.itemRow}>
+                <Text style={styles.itemIndex}>{index + 1}</Text>
+                <Text style={styles.itemText}>{item}</Text>
+              </View>
+            ))}
+        {order.notes ? <Notice>ملاحظات: {order.notes}</Notice> : null}
+      </Section>
+
+      <Section title="المبالغ">
+        {order.deliveryFeePiasters == null ? (
+          <Notice tone="warning">
+            {order.status === 'pending'
+              ? 'ستُضاف رسوم التوصيل إلى هذا الطلب عند إسناده للمندوب.'
+              : 'لم يتم تحديد رسوم توصيل لهذا الطلب.'}
+          </Notice>
+        ) : (
+          <>
+            <Body>رسوم التوصيل لهذا الطلب: {money(order.deliveryFeePiasters)}</Body>
+            <Body>إجمالي المبلغ المطلوب من العميل: {money(order.amountDuePiasters)}</Body>
+            {profile?.role === 'courier' ? (
+              <Body>أجر التوصيل المضاف لك: {money(order.deliveryFeePiasters)}</Body>
+            ) : null}
+          </>
+        )}
+        <Body>المطلوب دفعه للمطعم: {money(order.restaurantDuePiasters)}</Body>
+      </Section>
+
+      {profile?.role === 'restaurant' && contact && (
+        <Section title="بيانات المندوب">
+          <Notice tone="info">قبل المندوب هذا الطلب؛ يمكنك التواصل معه مباشرة.</Notice>
+          <Body>{contact.name}</Body>
+          <Body>{contact.phone}</Body>
+          <ActionButton
+            onPress={() => run(() => Linking.openURL(`tel:${contact.phone}`))}
+            tone="secondary"
+          >
+            اتصال بالمندوب
+          </ActionButton>
+        </Section>
+      )}
+
+      {profile?.role === 'restaurant' && !contact && ['assigned', 'pending'].includes(order.status) && (
+        <Notice>ستظهر بيانات المندوب بعد قبوله الطلب.</Notice>
+      )}
+
+      {profile?.role === 'admin' &&
+        ['pending', 'assigned', 'accepted', 'picked_up'].includes(order.status) && (
+        <Section title={order.courierId ? 'تحويل الطلب لمندوب آخر' : 'إسناد لمندوب'}>
+          {order.courierId ? (
+            <>
+              <Body>{assignedCourier?.fullName ?? 'مندوب'}</Body>
+              <Body>كود المندوب: {assignedCourier?.code ?? 'غير متاح'}</Body>
+            </>
+          ) : null}
+          {order.status === 'picked_up' ? (
+            <Notice tone="warning">
+              بعد التحويل، يؤكد المندوب الجديد استلام الطلب من المندوب السابق قبل إكمال التوصيل.
+            </Notice>
+          ) : null}
+          {order.status === 'pending' ? (
+            <>
+              <Body>أدخل رسوم التوصيل لهذا الطلب قبل إرساله؛ ستُضاف لإجمالي العميل وتظهر للمندوب.</Body>
+              <Field
+                keyboardType="decimal-pad"
+                label="رسوم التوصيل · جنيه"
+                onChangeText={updateDeliveryFeeInput}
+                value={deliveryFeeInput}
+              />
+              {feePreviewPiasters != null ? (
+                <Body>إجمالي العميل بعد الإسناد: {money(order.restaurantDuePiasters + feePreviewPiasters)}</Body>
+              ) : null}
+            </>
+          ) : null}
+          <ActionButton
+            disabled={onShiftCouriers.length === 0}
+            onPress={() => setShowCourierMap((visible) => !visible)}
+            tone="outline"
+          >
+            {showCourierMap ? 'إخفاء خريطة المندوبين' : 'عرض المندوبين على الخريطة'}
+          </ActionButton>
+          {onShiftCouriers.length === 0 ? (
+            <Notice tone="warning">لا يوجد مندوب نشط على الشيفت الآن.</Notice>
+          ) : showCourierMap ? (
+            <>
+              {Platform.OS !== 'web' && !googleMapsKeyConfigured ? (
+                <Notice tone="warning">الخريطة غير مهيأة على هذا الجهاز؛ يمكنك اختيار المندوب من القائمة أدناه.</Notice>
+              ) : onShiftLocations.length === 0 ? (
+                <Notice>لا توجد مواقع مرسلة للمندوبين حاليًا؛ شغّل مشاركة الموقع لعرضهم على الخريطة.</Notice>
+              ) : (
+                <Suspense fallback={<Notice>جارٍ تحميل الخريطة...</Notice>}>
+                  <CourierMap
+                    couriers={onShiftCouriers}
+                    locations={onShiftLocations}
+                    clock={clock}
+                    onCourierPress={setSelectedCourierId}
+                  />
+                </Suspense>
+              )}
+              {onShiftCouriers.map((courier) => {
+                const activeOrder = orders.find(
+                  (item) =>
+                    item.courierId === courier.id &&
+                    item.id !== order.id &&
+                    ['assigned', 'accepted', 'picked_up'].includes(item.status),
+                );
+                const location = onShiftLocations.find((item) => item.courierId === courier.id);
+                const isCurrentCourier = order.courierId === courier.id;
+                const isAvailable =
+                  !courier.isOnBreak &&
+                  !courier.shiftCloseRequestedAt &&
+                  !activeOrder &&
+                  !isCurrentCourier;
+                const locationIsStale =
+                  location != null && clock - new Date(location.recordedAt).getTime() > 120_000;
+                return (
+                  <View key={courier.id}>
+                    <ActionButton
+                      onPress={() => setSelectedCourierId(courier.id)}
+                      tone={selectedCourierId === courier.id ? 'secondary' : 'outline'}
+                    >
+                      {courier.fullName}{'\n'}{courier.code}
+                    </ActionButton>
+                    {selectedCourierId === courier.id ? (
+                      <>
+                        <Body>
+                          {isCurrentCourier
+                            ? 'المندوب الحالي لهذا الطلب'
+                            : activeOrder
+                              ? `مشغول بالطلب ${activeOrder.code}`
+                              : courier.shiftCloseRequestedAt
+                                ? 'طلب إغلاق الشيفت بانتظار موافقة الإدارة؛ لا يمكن إسناد طلب جديد.'
+                              : courier.isOnBreak
+                                ? 'في فترة راحة'
+                                : 'لا يوجد لديه طلب نشط'}
+                        </Body>
+                        <Body>
+                          {location
+                            ? locationIsStale
+                              ? 'آخر موقع مسجل قديم'
+                              : 'موقعه محدث'
+                            : 'لا يوجد موقع مسجل'}
+                        </Body>
+                        <ActionButton
+                          disabled={busy || !isAvailable}
+                          loading={busy}
+                          onPress={() => assignToCourier(courier.id)}
+                        >
+                          {courier.shiftCloseRequestedAt
+                            ? 'بانتظار الموافقة على إغلاق الشيفت'
+                            : order.courierId
+                              ? 'تحويل الطلب إلى هذا المندوب'
+                              : 'إرسال الطلب إلى هذا المندوب'}
+                        </ActionButton>
+                      </>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </>
+          ) : null}
+        </Section>
+      )}
+
+      {profile?.role === 'courier' && order.status === 'assigned' && (
+        <ActionButton
+          disabled={busy}
+          loading={busy}
+          onPress={() => run(() => acceptOrder(order.id), 'أصبح المطعم يرى اسمك ورقم تليفونك لهذا الطلب.')}
+        >
+          قبول واستلام الطلب
+        </ActionButton>
+      )}
+      {profile?.role === 'courier' && order.status === 'accepted' && (
+        <>
+          <Notice tone="info">عند استلام الطلب من المطعم، ادفع للمطعم: {money(order.restaurantDuePiasters)}</Notice>
+          <ActionButton
+            disabled={busy}
+            loading={busy}
+            onPress={() => run(() => advanceOrder(order.id, 'picked_up'), 'تم تسجيل استلام الطلب وبدء التوصيل.')}
+          >
+            استلمت الطلب وأبدأ التوصيل
+          </ActionButton>
+        </>
+      )}
+      {profile?.role === 'courier' && order.status === 'picked_up' && (
+        <>
+          <Notice tone="info">عند تسليم الطلب للعميل، حصّل منه: {money(order.amountDuePiasters)}</Notice>
+          <ActionButton
+            disabled={busy}
+            loading={busy}
+            onPress={deliverOrder}
+          >
+            تم التوصيل للعميل
+          </ActionButton>
+        </>
+      )}
+
+      {profile?.role === 'courier' && order.status === 'delivered' && (
+        <Section title="مبالغ الطلب">
+          <Body>المبلغ الذي حصّلته من العميل: {money(order.collectedPiasters ?? order.amountDuePiasters)}</Body>
+          <Body>المبلغ الذي دفعته للمطعم: {money(order.paidToRestaurantPiasters ?? order.restaurantDuePiasters)}</Body>
+          <Notice tone="info">تُسجّل المبالغ تلقائيًا من إجمالي الطلب عند تحديث حالته؛ لا تحتاج لكتابتها.</Notice>
+        </Section>
+      )}
+    </Page>
+  );
+}
+
+const styles = StyleSheet.create({
+  titleRow: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },
+  itemRow: { flexDirection: 'row-reverse', gap: spacing.sm, alignItems: 'flex-start' },
+  itemIndex: { color: colors.primary, fontWeight: '800', width: 22, textAlign: 'center' },
+  itemText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 23, textAlign: 'right', writingDirection: 'rtl' },
+  itemDetails: { flex: 1, gap: 4 },
+  itemSubtext: { color: colors.muted, fontSize: 12, textAlign: 'right', writingDirection: 'rtl' },
+});

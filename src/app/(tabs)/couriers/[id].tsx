@@ -21,6 +21,7 @@ export default function CourierDetailsScreen() {
     couriers,
     isDemo,
     getCourierPrivateDetails,
+    approveCourierShiftClose,
     renewCourierContract,
     terminateCourier,
     updateCourierProfile,
@@ -165,7 +166,9 @@ export default function CourierDetailsScreen() {
       <Page>
         <Heading>ملف المندوب</Heading>
         <Notice tone="danger">حساب المندوب غير موجود في القائمة الحالية.</Notice>
-        <ActionButton onPress={() => router.back()} tone="outline">العودة إلى القائمة</ActionButton>
+        <ActionButton onPress={() => router.replace('/(tabs)/couriers')} tone="outline">
+          العودة إلى قائمة المندوبين
+        </ActionButton>
       </Page>
     );
   }
@@ -175,7 +178,9 @@ export default function CourierDetailsScreen() {
 
   return (
     <Page>
-      <ActionButton onPress={() => router.back()} tone="outline">العودة إلى المناديب</ActionButton>
+      <ActionButton onPress={() => router.replace('/(tabs)/couriers')} tone="outline">
+        العودة إلى قائمة المندوبين
+      </ActionButton>
       <Heading>ملف {courier.fullName}</Heading>
       <Body>رقم المندوب الثابت: {courier.code}</Body>
       {isDemo ? (
@@ -187,7 +192,50 @@ export default function CourierDetailsScreen() {
       ) : details ? (
         <>
           <Section title="حالة الحساب والعقد">
-            <Body>الحالة: {isTerminated ? 'إيقاف نهائي' : !details.isActive ? 'موقوف مؤقتًا' : details.isOnShift ? 'على الشيفت' : 'غير متصل'}</Body>
+            <Body>
+              الحالة: {isTerminated
+                ? 'إيقاف نهائي'
+                : !details.isActive
+                  ? 'موقوف مؤقتًا'
+                  : courier.shiftCloseRequestedAt
+                    ? 'بانتظار موافقة إغلاق الشيفت'
+                    : details.isOnShift
+                      ? 'على الشيفت'
+                      : 'غير متصل'}
+            </Body>
+            {courier.shiftStartedAt ? (
+              <Body>بدأ الشيفت: {new Date(courier.shiftStartedAt).toLocaleString('ar-EG')}</Body>
+            ) : courier.isOnShift ? (
+              <Body>وقت بداية هذا الشيفت غير مسجل.</Body>
+            ) : null}
+            {courier.shiftEndedAt ? (
+              <Body>انتهى آخر شيفت: {new Date(courier.shiftEndedAt).toLocaleString('ar-EG')}</Body>
+            ) : null}
+            {courier.shiftCloseRequestedAt ? (
+              <>
+                <Notice tone="warning">
+                  طلب إغلاق الشيفت منذ {new Date(courier.shiftCloseRequestedAt).toLocaleString('ar-EG')}.
+                </Notice>
+                <ActionButton
+                  disabled={busyAction !== ''}
+                  loading={busyAction === 'approve-shift'}
+                  onPress={async () => {
+                    setErrorMessage('');
+                    setBusyAction('approve-shift');
+                    try {
+                      await approveCourierShiftClose(courierId);
+                      await loadDetails();
+                    } catch (error) {
+                      setErrorMessage(error instanceof Error ? error.message : 'تعذرت الموافقة على إغلاق الشيفت.');
+                    } finally {
+                      setBusyAction('');
+                    }
+                  }}
+                >
+                  الموافقة على إغلاق الشيفت
+                </ActionButton>
+              </>
+            ) : null}
             <Body>بداية العقد: {formatDate(details.contractStartDate)}</Body>
             <Body>نهاية العقد: {formatDate(details.contractEndDate)}</Body>
             {details.breakUntil && new Date(details.breakUntil) > new Date() ? (

@@ -21,6 +21,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     ],
     ['expo-notifications', { color: '#174A86' }],
+    '@react-native-community/datetimepicker',
   ];
 
   if (process.env.GOOGLE_MAPS_API_KEY) {

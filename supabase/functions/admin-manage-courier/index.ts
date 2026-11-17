@@ -72,7 +72,7 @@ Deno.serve(async (request) => {
   });
   if (authUpdate.error) return respond({ error: 'تعذر تحديث حالة تسجيل الدخول للمندوب.' }, 500);
 
-  const { error: accountError } = await serviceClient.rpc('admin_set_courier_active', {
+  const { error: accountError } = await callerClient.rpc('admin_set_courier_active', {
     p_courier_id: courierId,
     p_is_active: isActive,
   });

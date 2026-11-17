@@ -30,6 +30,7 @@ export const demoOrders: DeliveryOrder[] = [
     itemsText: 'وجبة تجريبية × 1\nمشروب × 2',
     notes: 'بيانات توضيحية فقط',
     amountDuePiasters: 23500,
+    deliveryFeePiasters: 4500,
     restaurantDuePiasters: 19000,
     collectedPiasters: 23500,
     paidToRestaurantPiasters: 19000,
@@ -54,6 +55,7 @@ export const demoOrders: DeliveryOrder[] = [
     itemsText: 'صنف تجريبي × 2',
     notes: '',
     amountDuePiasters: 18000,
+    deliveryFeePiasters: 3500,
     restaurantDuePiasters: 14500,
     status: 'picked_up',
     createdAt: today,
@@ -65,13 +67,15 @@ export const demoOrders: DeliveryOrder[] = [
     restaurantId: 2,
     restaurantName: 'مطبخ تجريبي آخر',
     restaurantAddress: 'عنوان توضيحي آخر',
+    restaurantLatitude: 30.0492,
+    restaurantLongitude: 31.2334,
     courierId: undefined,
     customerName: 'عميل تجريبي',
     customerPhone: '010 0000 0003',
     customerAddress: 'عنوان تجريبي — القاهرة',
     itemsText: 'طلب تجريبي',
     notes: '',
-    amountDuePiasters: 12750,
+    amountDuePiasters: 10000,
     restaurantDuePiasters: 10000,
     status: 'pending',
     createdAt: today,
@@ -91,6 +95,12 @@ export const demoCouriers: Courier[] = [
     contractStartDate: today.slice(0, 10),
     contractEndDate: new Date(new Date(today).setFullYear(now.getFullYear() + 1)).toISOString().slice(0, 10),
     isTerminated: false,
+    location: {
+      courierId: 1,
+      latitude: 30.0444,
+      longitude: 31.2357,
+      recordedAt: today,
+    },
   },
   {
     id: 2,
@@ -104,6 +114,12 @@ export const demoCouriers: Courier[] = [
     contractStartDate: today.slice(0, 10),
     contractEndDate: new Date(new Date(today).setFullYear(now.getFullYear() + 1)).toISOString().slice(0, 10),
     isTerminated: false,
+    location: {
+      courierId: 2,
+      latitude: 30.0501,
+      longitude: 31.2318,
+      recordedAt: today,
+    },
   },
 ];
 
@@ -117,7 +133,7 @@ export const demoRestaurants: Restaurant[] = [
     address: 'عنوان المطعم التجريبي',
     latitude: 30.0444,
     longitude: 31.2357,
-    deliveryFeePiasters: 4500,
+    acceptsOrders: true,
   },
   {
     id: 2,
@@ -126,7 +142,9 @@ export const demoRestaurants: Restaurant[] = [
     email: 'restaurant2@example.test',
     phone: '02 0000 0001',
     address: 'عنوان توضيحي آخر',
-    deliveryFeePiasters: 2750,
+    latitude: 30.0492,
+    longitude: 31.2334,
+    acceptsOrders: true,
   },
 ];
 
@@ -196,7 +214,7 @@ export function demoProfile(role: AppProfile['role']): AppProfile {
       name: demoRestaurants[0].name,
       email: demoRestaurants[0].email,
       restaurantId: demoRestaurants[0].id,
-      deliveryFeePiasters: demoRestaurants[0].deliveryFeePiasters,
+      restaurantAcceptsOrders: demoRestaurants[0].acceptsOrders,
     };
   }
   if (role === 'support') {

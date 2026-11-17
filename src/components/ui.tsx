@@ -1,4 +1,5 @@
 import type { PropsWithChildren, ReactNode } from 'react';
+import { useSegments } from 'expo-router';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,16 +10,23 @@ import {
   type TextInputProps,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { OrderStatus } from '../types';
 import { colors, spacing } from '../theme';
 
 export function Page({ children }: PropsWithChildren) {
+  const segments = useSegments();
+  const insets = useSafeAreaInsets();
+  const isTabScreen = segments[0] === '(tabs)';
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
-        contentContainerStyle={styles.page}
+        contentContainerStyle={[
+          styles.page,
+          isTabScreen && { paddingBottom: 96 + insets.bottom },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -164,6 +172,37 @@ export function Section({
   );
 }
 
+export function SegmentedSwitch({
+  items,
+  selected,
+  onSelect,
+}: {
+  items: { key: string; label: string }[];
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <View style={styles.segmentedSwitch}>
+      {items.map((item) => {
+        const isSelected = selected === item.key;
+        return (
+          <Pressable
+            key={item.key}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isSelected }}
+            onPress={() => onSelect(item.key)}
+            style={[styles.segmentedItem, isSelected && styles.segmentedItemSelected]}
+          >
+            <Text style={[styles.segmentedLabel, isSelected && styles.segmentedLabelSelected]}>
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export function Divider() {
   return <View style={styles.divider} />;
 }
@@ -290,6 +329,35 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '700',
     textAlign: 'right',
+  },
+  segmentedSwitch: {
+    flexDirection: 'row-reverse',
+    gap: spacing.xs,
+    padding: 4,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.outline,
+  },
+  segmentedItem: {
+    minHeight: 44,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    borderRadius: 12,
+  },
+  segmentedItemSelected: {
+    backgroundColor: colors.primary,
+  },
+  segmentedLabel: {
+    color: colors.primaryDark,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  segmentedLabelSelected: {
+    color: colors.white,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

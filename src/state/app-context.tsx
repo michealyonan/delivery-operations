@@ -86,12 +86,20 @@ interface AppContextValue {
   ) => Promise<void>;
   createCourier: (input: NewCourierInput) => Promise<TemporaryCredentials>;
   createRestaurant: (input: NewRestaurantInput) => Promise<TemporaryCredentials>;
-  setRestaurantDeliveryFee: (restaurantId: number, feePiasters: number) => Promise<void>;
-  assignOrder: (orderId: string, courierId: number) => Promise<void>;
+  cancelOrder: (orderId: string) => Promise<void>;
+  assignOrder: (
+    orderId: string,
+    courierId: number,
+    deliveryFeePiasters?: number,
+  ) => Promise<void>;
+  assignOrderToNearestCourier: (
+    orderId: string,
+    deliveryFeePiasters: number,
+  ) => Promise<number>;
   acceptOrder: (orderId: string) => Promise<void>;
   advanceOrder: (orderId: string, status: 'picked_up' | 'delivered') => Promise<void>;
-  recordCash: (orderId: string, collectedPiasters: number, paidPiasters: number) => Promise<void>;
   setShift: (active: boolean) => Promise<void>;
+  approveCourierShiftClose: (courierId: number) => Promise<void>;
   setCourierActive: (courierId: number, active: boolean) => Promise<void>;
   setBreakRequestsEnabled: (enabled: boolean) => Promise<void>;
   requestCourierBreak: (durationMinutes: number) => Promise<string>;
@@ -109,11 +117,29 @@ interface AppContextValue {
   getCourierPrivateDetails: (courierId: number) => Promise<CourierPrivateDetails>;
   getCourierContact: (orderId: string) => Promise<{ name: string; phone: string } | null>;
   setRestaurantLocation: (latitude: number, longitude: number) => Promise<void>;
+  setRestaurantAcceptingOrders: (restaurantId: number, acceptsOrders: boolean) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 const cloneDemoOrders = () => demoOrders.map((order) => ({ ...order }));
+
+function distanceInMeters(
+  firstLatitude: number,
+  firstLongitude: number,
+  secondLatitude: number,
+  secondLongitude: number,
+) {
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(secondLatitude - firstLatitude);
+  const longitudeDelta = radians(secondLongitude - firstLongitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(radians(firstLatitude)) *
+      Math.cos(radians(secondLatitude)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
 
 function assertBackend() {
   if (!supabase || !isBackendConfigured) {
@@ -171,8 +197,18 @@ function mapOrder(row: Record<string, unknown>): DeliveryOrder {
         : asNumber(row.paid_to_restaurant_piasters),
     status: row.status as OrderStatus,
     createdAt: String(row.created_at),
+    lastUnacceptedCourierId:
+      row.last_unaccepted_courier_id == null
+        ? undefined
+        : asNumber(row.last_unaccepted_courier_id),
+    assignmentExpiredAt:
+      row.assignment_expired_at == null ? undefined : String(row.assignment_expired_at),
     acceptedAt: row.accepted_at == null ? undefined : String(row.accepted_at),
     deliveredAt: row.delivered_at == null ? undefined : String(row.delivered_at),
+    cancelledAt:
+      row.status === 'cancelled' && row.updated_at != null
+        ? String(row.updated_at)
+        : undefined,
   };
 }
 
@@ -261,16 +297,27 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       const { data: presence, error: presenceError } = await client
         .from('courier_presence')
-        .select('is_on_shift, break_until')
+        .select('is_on_shift, break_until, shift_close_requested_at')
         .eq('courier_id', courier.id)
         .maybeSingle();
       if (presenceError) throw presenceError;
+      const { data: shift, error: shiftError } = await client
+        .from('courier_shifts')
+        .select('started_at, ended_at, created_at')
+        .eq('courier_id', courier.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (shiftError) throw shiftError;
       return {
         ...base,
         courierId: asNumber(courier.id),
         courierCode: courier.courier_code,
         profilePhotoUrl,
         isOnShift: Boolean(presence?.is_on_shift),
+        shiftStartedAt: shift?.ended_at == null ? shift?.started_at ?? undefined : undefined,
+        shiftCloseRequestedAt: presence?.shift_close_requested_at ?? undefined,
+        shiftEndedAt: shift?.ended_at ?? undefined,
         breakUntil: presence?.break_until ?? undefined,
         contractStartDate: courier.contract_start_date,
         contractEndDate: courier.contract_end_date,
@@ -281,7 +328,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     if (base.role === 'restaurant') {
       const { data: restaurant, error: restaurantError } = await client
         .from('restaurants')
-        .select('id, address, latitude, longitude, delivery_fee_piasters')
+        .select('id, address, latitude, longitude, accepts_orders')
         .eq('user_id', userId)
         .single();
       if (restaurantError) throw restaurantError;
@@ -289,11 +336,11 @@ export function AppProvider({ children }: PropsWithChildren) {
         ...base,
         restaurantId: asNumber(restaurant.id),
         restaurantAddress: restaurant.address,
-        deliveryFeePiasters: asNumber(restaurant.delivery_fee_piasters),
         restaurantLatitude:
           restaurant.latitude == null ? undefined : asNumber(restaurant.latitude),
         restaurantLongitude:
           restaurant.longitude == null ? undefined : asNumber(restaurant.longitude),
+        restaurantAcceptsOrders: restaurant.accepts_orders,
       };
     }
 
@@ -322,6 +369,50 @@ export function AppProvider({ children }: PropsWithChildren) {
       return;
     }
     if (!profile || !supabase) return;
+
+    if (profile.role === 'courier' && profile.courierId) {
+      const client = assertBackend();
+      const { data: presence, error: presenceError } = await client
+        .from('courier_presence')
+        .select('is_on_shift, break_until, shift_close_requested_at')
+        .eq('courier_id', profile.courierId)
+        .maybeSingle();
+      if (presenceError) throw presenceError;
+      const { data: shift, error: shiftError } = await client
+        .from('courier_shifts')
+        .select('started_at, ended_at, created_at')
+        .eq('courier_id', profile.courierId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (shiftError) throw shiftError;
+      setProfile((current) =>
+        current?.id === profile.id
+          ? {
+              ...current,
+              isOnShift: Boolean(presence?.is_on_shift),
+              breakUntil: presence?.break_until ?? undefined,
+              shiftStartedAt: shift?.ended_at == null ? shift?.started_at ?? undefined : undefined,
+              shiftCloseRequestedAt: presence?.shift_close_requested_at ?? undefined,
+              shiftEndedAt: shift?.ended_at ?? undefined,
+            }
+          : current,
+      );
+    }
+
+    if (profile.role === 'restaurant' && profile.restaurantId) {
+      const { data: restaurantState, error: restaurantError } = await supabase
+        .from('restaurants')
+        .select('accepts_orders')
+        .eq('id', profile.restaurantId)
+        .single();
+      if (restaurantError) throw restaurantError;
+      setProfile((current) =>
+        current?.id === profile.id
+          ? { ...current, restaurantAcceptsOrders: restaurantState.accepts_orders }
+          : current,
+      );
+    }
 
     const { data: orderRows, error: ordersError } = await supabase
       .from('orders')
@@ -416,13 +507,29 @@ export function AppProvider({ children }: PropsWithChildren) {
 
     const { data: courierRows, error: couriersError } = await supabase
       .from('couriers')
-      .select('id, courier_code, user_id, full_name, phone, email, is_active, contract_start_date, contract_end_date, terminated_at, courier_presence(is_on_shift, break_until)');
+      .select('id, courier_code, user_id, full_name, phone, email, is_active, contract_start_date, contract_end_date, terminated_at, courier_presence(is_on_shift, break_until, shift_close_requested_at)');
     if (couriersError) throw couriersError;
+    const { data: shiftRows, error: shiftsError } = await supabase
+      .from('courier_shifts')
+      .select('courier_id, started_at, ended_at, created_at')
+      .order('created_at', { ascending: false });
+    if (shiftsError) throw shiftsError;
+    const latestShiftByCourier = new Map<number, { startedAt?: string; endedAt?: string }>();
+    for (const shift of shiftRows ?? []) {
+      const courierId = asNumber(shift.courier_id);
+      if (!latestShiftByCourier.has(courierId)) {
+        latestShiftByCourier.set(courierId, {
+          startedAt: shift.started_at ?? undefined,
+          endedAt: shift.ended_at ?? undefined,
+        });
+      }
+    }
     setCouriers(
       (courierRows ?? []).map((item) => {
         const presence = Array.isArray(item.courier_presence)
           ? item.courier_presence[0]
           : item.courier_presence;
+        const shift = latestShiftByCourier.get(asNumber(item.id));
         return {
           id: asNumber(item.id),
           code: item.courier_code,
@@ -431,6 +538,9 @@ export function AppProvider({ children }: PropsWithChildren) {
           email: item.email,
           isActive: item.is_active && !item.terminated_at,
           isOnShift: item.is_active && Boolean(presence?.is_on_shift),
+          shiftStartedAt: shift?.endedAt ? undefined : shift?.startedAt,
+          shiftCloseRequestedAt: presence?.shift_close_requested_at ?? undefined,
+          shiftEndedAt: shift?.endedAt,
           isOnBreak: Boolean(presence?.break_until && new Date(presence.break_until) > new Date()),
           breakUntil: presence?.break_until ?? undefined,
           contractStartDate: item.contract_start_date,
@@ -442,7 +552,7 @@ export function AppProvider({ children }: PropsWithChildren) {
 
     const { data: restaurantRows, error: restaurantsError } = await supabase
       .from('restaurants')
-      .select('id, restaurant_code, name, email, phone, address, latitude, longitude, delivery_fee_piasters');
+    .select('id, restaurant_code, name, email, phone, address, latitude, longitude, accepts_orders');
     if (restaurantsError) throw restaurantsError;
     setRestaurants(
       (restaurantRows ?? []).map((item) => ({
@@ -454,7 +564,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         address: item.address,
         latitude: item.latitude == null ? undefined : asNumber(item.latitude),
         longitude: item.longitude == null ? undefined : asNumber(item.longitude),
-        deliveryFeePiasters: asNumber(item.delivery_fee_piasters),
+        acceptsOrders: item.accepts_orders,
       })),
     );
 
@@ -519,13 +629,35 @@ export function AppProvider({ children }: PropsWithChildren) {
           console.error('تعذر تحديث الطلبات فورًا:', error);
         });
       });
-    if (profile.role === 'admin') {
+    if (profile.role === 'admin' || profile.role === 'restaurant' || profile.role === 'courier') {
       channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'courier_locations' },
         () => {
           refresh().catch((error: unknown) => {
             console.error('تعذر تحديث مواقع المندوبين:', error);
+          });
+        },
+      );
+    }
+    if (profile.role === 'admin' || profile.role === 'restaurant') {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'restaurants' },
+        () => {
+          refresh().catch((error: unknown) => {
+            console.error('تعذر تحديث حالة استقبال طلبات المطعم:', error);
+          });
+        },
+      );
+    }
+    if (profile.role === 'admin' || profile.role === 'courier') {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'courier_presence' },
+        () => {
+          refresh().catch((error: unknown) => {
+            console.error('تعذر تحديث حالة الشيفت:', error);
           });
         },
       );
@@ -539,6 +671,15 @@ export function AppProvider({ children }: PropsWithChildren) {
       void supabase?.removeChannel(channel);
     };
   }, [isDemo, profile, refresh]);
+
+  useEffect(() => {
+    if (isDemo || profile?.role !== 'courier' || profile.isOnShift) return;
+    import('../lib/location')
+      .then(({ stopShiftLocationUpdates }) => stopShiftLocationUpdates())
+      .catch((error: unknown) => {
+        console.error('تعذر إيقاف مشاركة موقع المندوب بعد إغلاق الشيفت:', error);
+      });
+  }, [isDemo, profile?.isOnShift, profile?.role]);
 
   useEffect(() => {
     if (isDemo || profile?.role !== 'courier' || !profile.isOnShift) return;
@@ -592,13 +733,12 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, []);
 
   const signOut = useCallback(async () => {
-    if (!isDemo && profile?.role === 'courier' && profile.courierId && supabase) {
+    if (!isDemo && profile?.role === 'courier' && profile.isOnShift) {
+      throw new Error('لا يمكن تسجيل الخروج قبل موافقة الإدارة على إغلاق الشيفت.');
+    }
+    if (!isDemo && profile?.role === 'courier' && supabase) {
       const { stopShiftLocationUpdates } = await import('../lib/location');
       await stopShiftLocationUpdates();
-      const { error: shiftError } = await supabase.rpc('set_courier_shift', {
-        p_active: false,
-      });
-      if (shiftError) throw shiftError;
     }
     if (!isDemo && supabase) {
       const { error } = await supabase.auth.signOut({ scope: 'local' });
@@ -685,6 +825,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (!profile || profile.role !== 'restaurant') {
         throw new Error('إنشاء الطلبات متاح لحسابات المطاعم فقط.');
       }
+      if (profile.restaurantAcceptsOrders === false) {
+        throw new Error('أوقفت الإدارة استقبال الطلبات الجديدة لهذا المطعم.');
+      }
       if (isDemo) {
         const restaurant = demoRestaurants.find((item) => item.id === profile.restaurantId);
         const selectedItems = input.items.map(({ itemId, quantity }) => {
@@ -706,8 +849,6 @@ export function AppProvider({ children }: PropsWithChildren) {
           (total, item) => total + item.lineTotalPiasters,
           0,
         );
-        const deliveryFeePiasters =
-          profile.deliveryFeePiasters ?? restaurant?.deliveryFeePiasters ?? 0;
         setOrders((current) => [
           {
             id: `demo-order-${Date.now()}`,
@@ -724,8 +865,8 @@ export function AppProvider({ children }: PropsWithChildren) {
             lineItems: selectedItems,
             notes: input.notes,
             restaurantDuePiasters,
-            amountDuePiasters: restaurantDuePiasters + deliveryFeePiasters,
-            deliveryFeePiasters,
+            amountDuePiasters: restaurantDuePiasters,
+            deliveryFeePiasters: undefined,
             status: 'pending',
             createdAt: new Date().toISOString(),
           },
@@ -866,44 +1007,51 @@ export function AppProvider({ children }: PropsWithChildren) {
     [isDemo, profile, refresh],
   );
 
-  const setRestaurantDeliveryFee = useCallback(
-    async (restaurantId: number, feePiasters: number) => {
+  const cancelOrder = useCallback(
+    async (orderId: string) => {
       if (!profile || profile.role !== 'admin') {
-        throw new Error('تحديد رسوم التوصيل متاح للإدارة فقط.');
-      }
-      if (!Number.isSafeInteger(feePiasters) || feePiasters < 0) {
-        throw new Error('أدخل رسوم توصيل صحيحة لا تقل عن صفر.');
+        throw new Error('إلغاء الطلبات متاح للإدارة فقط.');
       }
       if (isDemo) {
-        setRestaurants((current) =>
-          current.map((restaurant) =>
-            restaurant.id === restaurantId
-              ? { ...restaurant, deliveryFeePiasters: feePiasters }
-              : restaurant,
+        const order = orders.find((item) => item.id === orderId);
+        if (!order || order.status !== 'pending') {
+          throw new Error('يمكن إلغاء الطلبات التي ما زالت بانتظار مراجعة الإدارة فقط.');
+        }
+        setOrders((current) =>
+          current.map((item) =>
+            item.id === orderId
+              ? { ...item, status: 'cancelled', cancelledAt: new Date().toISOString() }
+              : item,
           ),
         );
         return;
       }
-      const { error } = await assertBackend().rpc('admin_set_restaurant_delivery_fee', {
-        p_restaurant_id: restaurantId,
-        p_delivery_fee_piasters: feePiasters,
+      const { error } = await assertBackend().rpc('admin_cancel_order', {
+        p_order_id: orderId,
       });
       if (error) throw error;
       await refresh();
     },
-    [isDemo, profile, refresh],
+    [isDemo, orders, profile, refresh],
   );
 
   const assignOrder = useCallback(
-    async (orderId: string, courierId: number) => {
+    async (orderId: string, courierId: number, deliveryFeePiasters?: number) => {
       if (!profile || profile.role !== 'admin') {
         throw new Error('إسناد الطلبات متاح للإدارة فقط.');
+      }
+      if (
+        deliveryFeePiasters !== undefined &&
+        (!Number.isSafeInteger(deliveryFeePiasters) || deliveryFeePiasters < 0)
+      ) {
+        throw new Error('أدخل رسوم توصيل صحيحة لا تقل عن صفر.');
       }
       if (isDemo) {
         const courier = couriers.find((item) => item.id === courierId);
         if (
           !courier?.isActive ||
           !courier.isOnShift ||
+          courier.shiftCloseRequestedAt ||
           courier.isOnBreak ||
           courier.isTerminated ||
           courier.contractEndDate < new Date().toISOString().slice(0, 10)
@@ -914,6 +1062,10 @@ export function AppProvider({ children }: PropsWithChildren) {
         if (!order || !['pending', 'assigned', 'accepted', 'picked_up'].includes(order.status)) {
           throw new Error('لا يمكن تحويل هذا الطلب بعد الآن.');
         }
+        const feePiasters = deliveryFeePiasters ?? order.deliveryFeePiasters;
+        if (feePiasters == null) {
+          throw new Error('أدخل رسوم التوصيل لهذا الطلب عند إسناده للمندوب.');
+        }
         setOrders((current) =>
           current.map((order) =>
             order.id === orderId
@@ -922,6 +1074,8 @@ export function AppProvider({ children }: PropsWithChildren) {
                   courierId,
                   courierName: courier.fullName,
                   courierPhone: courier.phone,
+                  deliveryFeePiasters: feePiasters,
+                  amountDuePiasters: order.restaurantDuePiasters + feePiasters,
                   status: 'assigned',
                   acceptedAt: undefined,
                 }
@@ -934,6 +1088,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const { error } = await client.rpc('admin_assign_order', {
         p_order_id: orderId,
         p_courier_id: courierId,
+        p_delivery_fee_piasters: deliveryFeePiasters ?? null,
       });
       if (error) throw error;
       await refresh();
@@ -1199,46 +1354,73 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       if (isDemo) throw new Error('بيانات الهوية غير متاحة في المعاينة.');
 
-      const { data, error } = await assertBackend().functions.invoke('admin-manage-account', {
-        body: { action: 'get-courier-details', accountType: 'courier', accountId: courierId },
-      });
-      if (error) throw new Error(await getAccountFunctionErrorMessage(error));
-      if (
-        !data ||
-        typeof data.id !== 'number' ||
-        typeof data.code !== 'string' ||
-        typeof data.fullName !== 'string' ||
-        typeof data.email !== 'string' ||
-        typeof data.phone !== 'string' ||
-        typeof data.nationalId !== 'string' ||
-        typeof data.address !== 'string' ||
-        typeof data.idCardUrl !== 'string' ||
-        (data.selfieUrl != null && typeof data.selfieUrl !== 'string') ||
-        typeof data.isActive !== 'boolean' ||
-        typeof data.isOnShift !== 'boolean' ||
-        typeof data.contractStartDate !== 'string' ||
-        typeof data.contractEndDate !== 'string' ||
-        (data.breakUntil != null && typeof data.breakUntil !== 'string') ||
-        (data.terminatedAt != null && typeof data.terminatedAt !== 'string')
-      ) {
-        throw new Error('بيانات هوية المندوب غير مكتملة.');
+      const client = assertBackend();
+      const { data: courier, error: courierError } = await client
+        .from('couriers')
+        .select('id, courier_code, user_id, full_name, email, phone, is_active, contract_start_date, contract_end_date, terminated_at')
+        .eq('id', courierId)
+        .maybeSingle();
+      if (courierError) throw courierError;
+      if (!courier) throw new Error('حساب المندوب غير موجود؛ حدّث قائمة المندوبين وحاول مرة أخرى.');
+
+      const [
+        { data: privateDetails, error: detailsError },
+        { data: accountProfile, error: profileError },
+        { data: presence, error: presenceError },
+      ] = await Promise.all([
+        client
+          .from('courier_private_details')
+          .select('national_id, address, id_card_path')
+          .eq('courier_id', courierId)
+          .maybeSingle(),
+        client
+          .from('profiles')
+          .select('profile_photo_path')
+          .eq('id', courier.user_id)
+          .maybeSingle(),
+        client
+          .from('courier_presence')
+          .select('is_on_shift, break_until')
+          .eq('courier_id', courierId)
+          .maybeSingle(),
+      ]);
+      if (detailsError) throw detailsError;
+      if (profileError) throw profileError;
+      if (presenceError) throw presenceError;
+      if (!privateDetails || !accountProfile) {
+        throw new Error('بيانات الهوية أو صور المندوب غير مكتملة. راجع ملفه أو حدّث بياناته.');
       }
+
+      const { data: card, error: cardError } = await client.storage
+        .from('courier-id-cards')
+        .createSignedUrl(privateDetails.id_card_path, 600);
+      if (cardError) throw cardError;
+
+      let selfieUrl: string | undefined;
+      if (accountProfile.profile_photo_path) {
+        const { data: selfie, error: selfieError } = await client.storage
+          .from('courier-profile-photos')
+          .createSignedUrl(accountProfile.profile_photo_path, 600);
+        if (selfieError) throw selfieError;
+        selfieUrl = selfie.signedUrl;
+      }
+
       return {
-        id: data.id,
-        code: data.code,
-        fullName: data.fullName,
-        email: data.email,
-        phone: data.phone,
-        nationalId: data.nationalId,
-        address: data.address,
-        idCardUrl: data.idCardUrl,
-        ...(data.selfieUrl ? { selfieUrl: data.selfieUrl } : {}),
-        isActive: data.isActive,
-        isOnShift: data.isOnShift,
-        ...(data.breakUntil ? { breakUntil: data.breakUntil } : {}),
-        contractStartDate: data.contractStartDate,
-        contractEndDate: data.contractEndDate,
-        ...(data.terminatedAt ? { terminatedAt: data.terminatedAt } : {}),
+        id: asNumber(courier.id),
+        code: courier.courier_code,
+        fullName: courier.full_name,
+        email: courier.email,
+        phone: courier.phone,
+        nationalId: privateDetails.national_id,
+        address: privateDetails.address,
+        idCardUrl: card.signedUrl,
+        ...(selfieUrl ? { selfieUrl } : {}),
+        isActive: courier.is_active,
+        isOnShift: Boolean(presence?.is_on_shift),
+        ...(presence?.break_until ? { breakUntil: presence.break_until } : {}),
+        contractStartDate: courier.contract_start_date,
+        contractEndDate: courier.contract_end_date,
+        ...(courier.terminated_at ? { terminatedAt: courier.terminated_at } : {}),
       } satisfies CourierPrivateDetails;
     },
     [isDemo, profile],
@@ -1281,6 +1463,12 @@ export function AppProvider({ children }: PropsWithChildren) {
             conversation.openedBy !== profile.id)
         ) {
           throw new Error('هذه المحادثة غير متاحة لهذا الحساب.');
+        }
+        if (
+          conversation.status === 'resolved' &&
+          (profile.role === 'courier' || profile.role === 'restaurant')
+        ) {
+          throw new Error('تم حل المشكلة وإغلاق المحادثة؛ لا يمكن إرسال رسائل جديدة.');
         }
         return demoMessages.filter((message) => message.conversationId === conversationId);
       }
@@ -1566,7 +1754,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         return;
       }
       const { error } = await assertBackend().rpc('accept_order', { p_order_id: orderId });
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('acceptance window has expired')) {
+          throw new Error('انتهت مهلة قبول الطلب؛ لم يعد بإمكانك قبوله وسيعود للإدارة تلقائيًا.');
+        }
+        throw error;
+      }
       await refresh();
     },
     [isDemo, refresh],
@@ -1581,6 +1774,14 @@ export function AppProvider({ children }: PropsWithChildren) {
               ? {
                   ...order,
                   status,
+                  paidToRestaurantPiasters:
+                    status === 'picked_up'
+                      ? order.restaurantDuePiasters
+                      : order.paidToRestaurantPiasters ?? order.restaurantDuePiasters,
+                  collectedPiasters:
+                    status === 'delivered'
+                      ? order.amountDuePiasters
+                      : order.collectedPiasters,
                   deliveredAt: status === 'delivered' ? new Date().toISOString() : undefined,
                 }
               : order,
@@ -1598,44 +1799,34 @@ export function AppProvider({ children }: PropsWithChildren) {
     [isDemo, refresh],
   );
 
-  const recordCash = useCallback(
-    async (orderId: string, collectedPiasters: number, paidPiasters: number) => {
-      if (isDemo) {
-        setOrders((current) =>
-          current.map((order) =>
-            order.id === orderId
-              ? {
-                  ...order,
-                  collectedPiasters,
-                  paidToRestaurantPiasters: paidPiasters,
-                }
-              : order,
-          ),
-        );
-        return;
-      }
-      const { error } = await assertBackend().rpc('record_order_cash', {
-        p_order_id: orderId,
-        p_collected_piasters: collectedPiasters,
-        p_paid_piasters: paidPiasters,
-      });
-      if (error) throw error;
-      await refresh();
-    },
-    [isDemo, refresh],
-  );
-
   const setShift = useCallback(
     async (active: boolean) => {
       if (!profile || profile.role !== 'courier' || !profile.courierId) {
         throw new Error('تغيير حالة الشيفت متاح لحساب المندوب فقط.');
       }
       if (isDemo) {
-        const nextProfile = { ...profile, isOnShift: active };
+        const now = new Date().toISOString();
+        const nextProfile = active
+          ? {
+              ...profile,
+              isOnShift: true,
+              shiftStartedAt: now,
+              shiftCloseRequestedAt: undefined,
+              shiftEndedAt: undefined,
+            }
+          : { ...profile, isOnShift: true, shiftCloseRequestedAt: now };
         setProfile(nextProfile);
         setCouriers((current) =>
           current.map((courier) =>
-            courier.id === profile.courierId ? { ...courier, isOnShift: active } : courier,
+            courier.id === profile.courierId
+              ? {
+                  ...courier,
+                  isOnShift: true,
+                  shiftStartedAt: active ? now : courier.shiftStartedAt,
+                  shiftCloseRequestedAt: active ? undefined : now,
+                  shiftEndedAt: active ? undefined : courier.shiftEndedAt,
+                }
+              : courier,
           ),
         );
         return;
@@ -1645,10 +1836,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       const {
         requestShiftLocationPermissions,
         startShiftLocationUpdates,
-        stopShiftLocationUpdates,
       } = await import('../lib/location');
       if (active) await requestShiftLocationPermissions();
-      if (!active) await stopShiftLocationUpdates();
       const { error } = await client.rpc('set_courier_shift', {
         p_active: active,
       });
@@ -1660,24 +1849,77 @@ export function AppProvider({ children }: PropsWithChildren) {
           const { error: rollbackError } = await client.rpc('set_courier_shift', {
             p_active: false,
           });
+          setProfile({
+            ...profile,
+            isOnShift: true,
+            shiftCloseRequestedAt: rollbackError ? undefined : new Date().toISOString(),
+          });
           if (rollbackError) {
             throw new Error(
-              `تعذر بدء مشاركة الموقع (${errorMessage(locationError, 'حاول مرة أخرى.')}) كما تعذر إيقاف الشيفت على الخادم (${rollbackError.message}).`,
+              `تعذر بدء مشاركة الموقع (${errorMessage(locationError, 'حاول مرة أخرى.')}) وكذلك إرسال طلب إغلاق الشيفت (${rollbackError.message}). تواصل مع الإدارة.`,
             );
           }
-          throw locationError;
+          throw new Error(
+            `تعذر بدء مشاركة الموقع (${errorMessage(locationError, 'حاول مرة أخرى.')})؛ أُرسل طلب إغلاق الشيفت إلى الإدارة للموافقة.`,
+          );
         }
       }
       setProfile({
         ...profile,
-        isOnShift: active,
-        breakUntil: active ? profile.breakUntil : undefined,
+        isOnShift: true,
+        shiftStartedAt: active ? new Date().toISOString() : profile.shiftStartedAt,
+        shiftCloseRequestedAt: active ? undefined : new Date().toISOString(),
       });
       await refresh();
     },
     [isDemo, profile, refresh],
   );
 
+  const approveCourierShiftClose = useCallback(
+    async (courierId: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('الموافقة على إغلاق الشيفت متاحة للإدارة فقط.');
+      }
+      if (isDemo) {
+        const endedAt = new Date().toISOString();
+        setCouriers((current) =>
+          current.map((courier) =>
+            courier.id === courierId
+              ? {
+                  ...courier,
+                  isOnShift: false,
+                  shiftCloseRequestedAt: undefined,
+                  shiftEndedAt: endedAt,
+                  shiftStartedAt: undefined,
+                }
+              : courier,
+          ),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('admin_approve_courier_shift_close', {
+        p_courier_id: courierId,
+      });
+      if (error) throw error;
+      const endedAt = new Date().toISOString();
+      setCouriers((current) =>
+        current.map((courier) =>
+          courier.id === courierId
+            ? {
+                ...courier,
+                isOnShift: false,
+                shiftCloseRequestedAt: undefined,
+                shiftEndedAt: endedAt,
+                shiftStartedAt: undefined,
+                isOnBreak: false,
+                breakUntil: undefined,
+              }
+            : courier,
+        ),
+      );
+    },
+    [isDemo, profile],
+  );
   const getCourierContact = useCallback(
     async (orderId: string) => {
       if (isDemo) {
@@ -1716,6 +1958,126 @@ export function AppProvider({ children }: PropsWithChildren) {
     [isDemo, profile, refresh],
   );
 
+  const assignOrderToNearestCourier = useCallback(
+    async (orderId: string, deliveryFeePiasters: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إسناد الطلبات متاح للإدارة فقط.');
+      }
+      if (!Number.isSafeInteger(deliveryFeePiasters) || deliveryFeePiasters < 0) {
+        throw new Error('أدخل رسوم توصيل صحيحة لا تقل عن صفر.');
+      }
+      if (isDemo) {
+        const order = orders.find((item) => item.id === orderId);
+        const restaurantLatitude = order?.restaurantLatitude;
+        const restaurantLongitude = order?.restaurantLongitude;
+        if (
+          !order ||
+          order.status !== 'pending' ||
+          restaurantLatitude == null ||
+          restaurantLongitude == null
+        ) {
+          throw new Error('لا يمكن تحديد أقرب مندوب؛ تأكد من أن الطلب ينتظر الإسناد وموقع المطعم محدد.');
+        }
+        const candidates = couriers
+          .flatMap((courier) => {
+            const hasActiveOrder = orders.some(
+              (item) =>
+                item.courierId === courier.id &&
+                ['assigned', 'accepted', 'picked_up'].includes(item.status),
+            );
+            const location = courier.location;
+            if (
+              courier.isActive &&
+              courier.isOnShift &&
+              !courier.shiftCloseRequestedAt &&
+              !courier.isOnBreak &&
+              !courier.isTerminated &&
+              courier.contractEndDate >= new Date().toISOString().slice(0, 10) &&
+              !hasActiveOrder &&
+              location != null
+            ) {
+              return [{ courier, location }];
+            }
+            return [];
+          })
+          .sort((first, second) => {
+            const firstDistance = distanceInMeters(
+              restaurantLatitude,
+              restaurantLongitude,
+              first.location.latitude,
+              first.location.longitude,
+            );
+            const secondDistance = distanceInMeters(
+              restaurantLatitude,
+              restaurantLongitude,
+              second.location.latitude,
+              second.location.longitude,
+            );
+            return firstDistance - secondDistance || first.courier.id - second.courier.id;
+          });
+        const courier = candidates[0]?.courier;
+        if (!courier) {
+          throw new Error('لا يوجد مندوب على الشيفت بلا طلب حالي ولديه موقع متاح.');
+        }
+        setOrders((current) =>
+          current.map((item) =>
+            item.id === orderId
+              ? {
+                  ...item,
+                  courierId: courier.id,
+                  courierName: courier.fullName,
+                  courierPhone: courier.phone,
+                  deliveryFeePiasters,
+                  amountDuePiasters: item.restaurantDuePiasters + deliveryFeePiasters,
+                  status: 'assigned',
+                  acceptedAt: undefined,
+                }
+              : item,
+          ),
+        );
+        return courier.id;
+      }
+
+      const { data, error } = await assertBackend().rpc(
+        'admin_assign_order_to_nearest_courier',
+        {
+          p_order_id: orderId,
+          p_delivery_fee_piasters: deliveryFeePiasters,
+        },
+      );
+      if (error) throw error;
+      const courierId = Number(data);
+      if (!Number.isSafeInteger(courierId) || courierId < 1) {
+        throw new Error('لم يرجع الخادم هوية المندوب الذي استلم الطلب.');
+      }
+      await refresh();
+      return courierId;
+    },
+    [couriers, isDemo, orders, profile, refresh],
+  );
+
+  const setRestaurantAcceptingOrders = useCallback(
+    async (restaurantId: number, acceptsOrders: boolean) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('تغيير استقبال الطلبات متاح للإدارة فقط.');
+      }
+      if (isDemo) {
+        throw new Error('تغيير استقبال الطلبات يحتاج إلى قاعدة بيانات متصلة.');
+      }
+      const { error } = await assertBackend().rpc('admin_set_restaurant_ordering', {
+        p_restaurant_id: restaurantId,
+        p_accepts_orders: acceptsOrders,
+      });
+      if (error) throw error;
+      setRestaurants((current) =>
+        current.map((restaurant) =>
+          restaurant.id === restaurantId ? { ...restaurant, acceptsOrders } : restaurant,
+        ),
+      );
+    },
+    [isDemo, profile],
+  );
+
   const contextValue = useMemo<AppContextValue>(
     () => ({
       profile,
@@ -1745,12 +2107,13 @@ export function AppProvider({ children }: PropsWithChildren) {
       saveRestaurantMenuItem,
       createCourier,
       createRestaurant,
-      setRestaurantDeliveryFee,
+      cancelOrder,
       assignOrder,
+      assignOrderToNearestCourier,
       acceptOrder,
       advanceOrder,
-      recordCash,
       setShift,
+      approveCourierShiftClose,
       setCourierActive,
       setBreakRequestsEnabled,
       requestCourierBreak,
@@ -1761,6 +2124,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       getCourierPrivateDetails,
       getCourierContact,
       setRestaurantLocation,
+      setRestaurantAcceptingOrders,
     }),
     [
       profile,
@@ -1790,12 +2154,13 @@ export function AppProvider({ children }: PropsWithChildren) {
       saveRestaurantMenuItem,
       createCourier,
       createRestaurant,
-      setRestaurantDeliveryFee,
+      cancelOrder,
       assignOrder,
+      assignOrderToNearestCourier,
       acceptOrder,
       advanceOrder,
-      recordCash,
       setShift,
+      approveCourierShiftClose,
       setCourierActive,
       setBreakRequestsEnabled,
       requestCourierBreak,
@@ -1806,6 +2171,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       getCourierPrivateDetails,
       getCourierContact,
       setRestaurantLocation,
+      setRestaurantAcceptingOrders,
     ],
   );
 

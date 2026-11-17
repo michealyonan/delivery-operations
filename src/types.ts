@@ -19,12 +19,15 @@ export interface AppProfile {
   profilePhotoUrl?: string;
   restaurantId?: number;
   restaurantAddress?: string;
-  deliveryFeePiasters?: number;
   restaurantLatitude?: number;
   restaurantLongitude?: number;
+  restaurantAcceptsOrders?: boolean;
   courierId?: number;
   courierCode?: string;
   isOnShift?: boolean;
+  shiftStartedAt?: string;
+  shiftCloseRequestedAt?: string;
+  shiftEndedAt?: string;
   breakUntil?: string;
   contractStartDate?: string;
   contractEndDate?: string;
@@ -51,6 +54,9 @@ export interface Courier {
   isOnShift: boolean;
   isOnBreak: boolean;
   breakUntil?: string;
+  shiftStartedAt?: string;
+  shiftCloseRequestedAt?: string;
+  shiftEndedAt?: string;
   contractStartDate: string;
   contractEndDate: string;
   isTerminated: boolean;
@@ -66,7 +72,7 @@ export interface Restaurant {
   address: string;
   latitude?: number;
   longitude?: number;
-  deliveryFeePiasters: number;
+  acceptsOrders: boolean;
 }
 
 export interface DeliveryOrder {
@@ -93,8 +99,11 @@ export interface DeliveryOrder {
   paidToRestaurantPiasters?: number;
   status: OrderStatus;
   createdAt: string;
+  lastUnacceptedCourierId?: number;
+  assignmentExpiredAt?: string;
   acceptedAt?: string;
   deliveredAt?: string;
+  cancelledAt?: string;
 }
 
 export interface OrderLineItem {

@@ -29,7 +29,7 @@ function RecentOrder({ order }: { order: DeliveryOrder }) {
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={() => router.push({ pathname: '/orders/[id]', params: { id: order.id } })}
+      onPress={() => router.push({ pathname: '/order-detail', params: { id: order.id } })}
       style={styles.orderRow}
     >
       <View style={styles.orderMain}>
@@ -55,7 +55,21 @@ function AdminHome() {
     (order) => order.status === 'delivered' && order.deliveredAt && isToday(order.deliveredAt),
   ).length;
   const pending = orders.filter((order) => order.status === 'pending').length;
-  const onShift = couriers.filter((courier) => courier.isOnShift && !courier.isOnBreak && courier.isActive && !courier.isTerminated).length;
+  const activeCouriers = couriers.filter((courier) => courier.isActive && !courier.isTerminated);
+  const onShift = activeCouriers.filter(
+    (courier) =>
+      courier.isOnShift &&
+      !courier.shiftCloseRequestedAt &&
+      !(courier.breakUntil && new Date(courier.breakUntil).getTime() > clock),
+  ).length;
+  const offShift = activeCouriers.filter((courier) => !courier.isOnShift).length;
+  const onBreak = activeCouriers.filter(
+    (courier) =>
+      courier.isOnShift &&
+      courier.breakUntil != null &&
+      new Date(courier.breakUntil).getTime() > clock,
+  ).length;
+  const shiftCloseRequests = activeCouriers.filter((courier) => courier.shiftCloseRequestedAt).length;
   const activeOrders = orders.filter(
     (order) => ['assigned', 'accepted', 'picked_up'].includes(order.status),
   );
@@ -107,9 +121,21 @@ function AdminHome() {
       {isDemo && <Notice tone="warning">معاينة ببيانات توضيحية فقط؛ لا يوجد تتبع مباشر في الوضع التجريبي.</Notice>}
       <View style={styles.metrics}>
         <Metric value={String(pending)} label="بانتظار الإسناد" />
-        <Metric value={String(onShift)} label="مندوب على الشيفت" />
         <Metric value={String(deliveredToday)} label="تم توصيلها اليوم" />
       </View>
+
+      <Section title="حالة المناديب الآن">
+        <View style={styles.metrics}>
+          <Metric value={String(onShift)} label="متاح لطلب جديد" />
+          <Metric value={String(offShift)} label="قافل الشيفت" />
+          <Metric value={String(onBreak)} label="في بريك" />
+        </View>
+        {shiftCloseRequests > 0 ? (
+          <Notice tone="warning">
+            {`طلبات إغلاق الشيفت بانتظار موافقتك: ${shiftCloseRequests}. يظل هؤلاء المناديب على الشيفت حتى اعتماد الإغلاق.`}
+          </Notice>
+        ) : null}
+      </Section>
 
       <Section
         title="موقع المندوبين"
@@ -129,7 +155,7 @@ function AdminHome() {
           </Notice>
         ) : (
           <Suspense fallback={<View style={styles.map} />}>
-            <CourierMap couriers={couriers} locations={locations} clock={clock} />
+            <CourierMap couriers={couriers} locations={locations} clock={clock} height={420} />
           </Suspense>
         )}
         {locations.map((location) => {
@@ -162,21 +188,13 @@ function AdminHome() {
         )}
       </Section>
 
-      <ActionButton onPress={() => router.push('/(tabs)/couriers')} tone="secondary">
-        إدارة حسابات المندوبين
-      </ActionButton>
-      <ActionButton onPress={() => router.navigate('/reports')} tone="outline">
-        فتح التقارير
-      </ActionButton>
-      <ActionButton onPress={() => router.push('/(tabs)/support')} tone="outline">
-        صندوق الدعم الفني
-      </ActionButton>
     </Page>
   );
 }
 
 function RestaurantHome() {
   const { profile, orders, isDemo, setRestaurantLocation } = useApp();
+  const acceptsOrders = profile?.restaurantAcceptsOrders !== false;
   const [busy, setBusy] = useState(false);
   const ownOrders = orders.filter((order) => order.restaurantId === profile?.restaurantId);
   const onShiftCount = ownOrders.filter((order) =>
@@ -202,6 +220,9 @@ function RestaurantHome() {
       <Heading>{profile?.name}</Heading>
       <Body>أرسل طلبات المطعم وتابع وصول المندوب.</Body>
       {isDemo && <Notice tone="warning">حساب تجريبي؛ الطلبات لا تصل إلى أجهزة أخرى.</Notice>}
+      {!acceptsOrders ? (
+        <Notice tone="warning">أوقفت الإدارة استقبال الطلبات الجديدة لهذا المطعم. يمكنك متابعة الطلبات السابقة وإدارة القائمة.</Notice>
+      ) : null}
       {profile?.restaurantAddress ? <Body>العنوان: {profile.restaurantAddress}</Body> : null}
       {profile?.restaurantLatitude != null && profile.restaurantLongitude != null ? (
         <Body>
@@ -214,10 +235,15 @@ function RestaurantHome() {
         <Metric value={String(ownOrders.length)} label="إجمالي الطلبات" />
         <Metric value={String(onShiftCount)} label="في التوصيل" />
       </View>
-      <ActionButton onPress={() => router.push('/orders/menu')} tone="outline">
+      <ActionButton onPress={() => router.push('/restaurant-menu')} tone="outline">
         إدارة أصناف المطعم وأسعارها
       </ActionButton>
-      <ActionButton onPress={() => router.push('/orders/new')}>إنشاء طلب جديد</ActionButton>
+      <ActionButton
+        disabled={!acceptsOrders}
+        onPress={() => router.push('/restaurant-new-order')}
+      >
+        {acceptsOrders ? 'إنشاء طلب جديد' : 'استقبال الطلبات متوقف'}
+      </ActionButton>
       <Section title="موقع المطعم">
         <Notice>
           حدّد موقعك من داخل المطعم مرة واحدة ليظهر للمندوب مع العنوان. يتطلب ذلك إذن الموقع أثناء الاستخدام.
@@ -241,10 +267,15 @@ function RestaurantHome() {
 function CourierHome() {
   const { profile, orders, isDemo, setShift } = useApp();
   const [busy, setBusy] = useState(false);
-  const [active, setActive] = useState(Boolean(profile?.isOnShift));
   const [shiftError, setShiftError] = useState('');
-  const myOrders = orders.filter((order) => order.courierId === profile?.courierId);
-  const todayOrders = myOrders.filter((order) => order.deliveredAt && isToday(order.deliveredAt));
+  const active = Boolean(profile?.isOnShift);
+  const closeRequested = Boolean(profile?.shiftCloseRequestedAt);
+  const allMyOrders = orders.filter((order) => order.courierId === profile?.courierId);
+  const myOrders = allMyOrders.filter((order) =>
+    ['assigned', 'accepted', 'picked_up'].includes(order.status),
+  );
+  const deliveredOrders = allMyOrders.filter((order) => order.status === 'delivered');
+  const todayOrders = deliveredOrders.filter((order) => order.deliveredAt && isToday(order.deliveredAt));
   const todayCollected = todayOrders.reduce(
     (total, order) => total + (order.collectedPiasters ?? 0),
     0,
@@ -255,7 +286,6 @@ function CourierHome() {
     setShiftError('');
     try {
       await setShift(!active);
-      setActive(!active);
     } catch (error) {
       setShiftError(error instanceof Error ? error.message : 'تعذر تغيير الشيفت. حاول مرة أخرى.');
     } finally {
@@ -269,22 +299,46 @@ function CourierHome() {
       <Body>رقم المندوب الثابت: {profile?.courierCode ?? 'معاينة'}</Body>
       {isDemo && <Notice tone="warning">الموقع والطلبات في هذه الشاشة بيانات تجريبية.</Notice>}
       <View style={[styles.shiftBanner, active ? styles.shiftOn : styles.shiftOff]}>
-        <Subheading>{active ? 'أنت على الشيفت' : 'الشيفت متوقف'}</Subheading>
+        <Subheading>
+          {closeRequested
+            ? 'طلب إغلاق الشيفت قيد المراجعة'
+            : active
+              ? 'أنت على الشيفت'
+              : 'الشيفت متوقف'}
+        </Subheading>
         <Body>
           {isDemo
             ? 'تشغيل الشيفت في المعاينة لا يشارك موقعًا حقيقيًا.'
             : Platform.OS === 'web'
               ? 'يُشارك موقعك أثناء فتح صفحة الويب فقط. اسمح بإذن الموقع؛ يحتاج الموقع المنشور إلى HTTPS.'
-              : 'يُشارك موقعك فقط أثناء الشيفت، ويتوقف عند إيقافه.'}
+              : 'يُشارك موقعك أثناء الشيفت، ويتوقف بعد موافقة الإدارة على طلب الإغلاق.'}
         </Body>
-        <ActionButton
-          loading={busy}
-          onPress={toggleShift}
-          tone={active ? 'outline' : 'primary'}
-        >
-          {active ? 'إيقاف الشيفت' : 'بدء الشيفت'}
-        </ActionButton>
-        {busy ? <Body>جارٍ طلب إذن الموقع وتأكيد أول تحديث لموقعك...</Body> : null}
+        {profile?.shiftStartedAt ? (
+          <Body>بدأ الشيفت: {new Date(profile.shiftStartedAt).toLocaleString('ar-EG')}</Body>
+        ) : active ? (
+          <Body>وقت بداية هذا الشيفت غير مسجل.</Body>
+        ) : null}
+        {profile?.shiftEndedAt ? (
+          <Body>انتهى آخر شيفت: {new Date(profile.shiftEndedAt).toLocaleString('ar-EG')}</Body>
+        ) : null}
+        {closeRequested ? (
+          <Notice tone="warning">
+            طلب إغلاق الشيفت بانتظار موافقة الإدارة. سيظل حسابك على الشيفت وموقعك مشتركًا حتى الموافقة.
+          </Notice>
+        ) : (
+          <ActionButton
+            loading={busy}
+            onPress={toggleShift}
+            tone={active ? 'outline' : 'primary'}
+          >
+            {active ? 'طلب إغلاق الشيفت' : 'بدء الشيفت'}
+          </ActionButton>
+        )}
+        {busy ? (
+          <Body>
+            {active ? 'جارٍ إرسال طلب إغلاق الشيفت...' : 'جارٍ طلب إذن الموقع وتأكيد أول تحديث لموقعك...'}
+          </Body>
+        ) : null}
         {shiftError ? <Notice tone="danger">{shiftError}</Notice> : null}
       </View>
       <View style={styles.metrics}>
@@ -304,6 +358,11 @@ function CourierHome() {
       <ActionButton onPress={() => router.push('/(tabs)/orders')} tone="secondary">
         فتح كل طلباتي
       </ActionButton>
+      {deliveredOrders.length > 0 ? (
+        <ActionButton onPress={() => router.push('/(tabs)/orders')} tone="outline">
+          عرض الطلبات السابقة · {deliveredOrders.length}
+        </ActionButton>
+      ) : null}
     </Page>
   );
 }
@@ -340,7 +399,7 @@ const styles = StyleSheet.create({
   metricValue: { color: colors.primaryDark, fontSize: 22, fontWeight: '800' },
   metricLabel: { color: colors.muted, fontSize: 12, textAlign: 'center', writingDirection: 'rtl' },
   actionText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
-  map: { height: 230, borderRadius: 16 },
+  map: { height: 420, borderRadius: 16 },
   orderRow: {
     minHeight: 65,
     flexDirection: 'row-reverse',

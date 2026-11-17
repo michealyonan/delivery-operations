@@ -7,19 +7,27 @@ export default function CourierMap({
   couriers,
   locations,
   clock,
+  height = 280,
+  onCourierPress,
 }: {
   couriers: Courier[];
   locations: CourierLocation[];
   clock: number;
+  height?: number;
+  onCourierPress?: (courierId: number) => void;
 }) {
+  const latitudes = locations.map((location) => location.latitude);
+  const longitudes = locations.map((location) => location.longitude);
+  const latitudeSpan = Math.max(Math.max(...latitudes) - Math.min(...latitudes), 0.02);
+  const longitudeSpan = Math.max(Math.max(...longitudes) - Math.min(...longitudes), 0.02);
   return (
     <MapView
-      style={{ height: 280, borderRadius: 16, overflow: 'hidden' }}
+      style={{ height, borderRadius: 16, overflow: 'hidden' }}
       initialRegion={{
-        latitude: locations[0].latitude,
-        longitude: locations[0].longitude,
-        latitudeDelta: 0.1,
-        longitudeDelta: 0.1,
+        latitude: (Math.max(...latitudes) + Math.min(...latitudes)) / 2,
+        longitude: (Math.max(...longitudes) + Math.min(...longitudes)) / 2,
+        latitudeDelta: latitudeSpan * 1.5,
+        longitudeDelta: longitudeSpan * 1.5,
       }}
     >
       {locations.map((location) => {
@@ -32,6 +40,7 @@ export default function CourierMap({
             title={courier?.fullName ?? 'مندوب'}
             description={stale ? 'آخر موقع قديم' : 'موقع حديث'}
             pinColor={stale ? colors.warning : colors.primary}
+            onPress={() => onCourierPress?.(location.courierId)}
           />
         );
       })}

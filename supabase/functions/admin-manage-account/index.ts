@@ -290,14 +290,21 @@ Deno.serve(async (request) => {
     userId = account?.id ?? null;
   }
   if (!userId) return respond({ error: 'الحساب غير موجود.' }, 404);
-  const expectedRole = accountType;
-  const { data: targetProfile, error: targetProfileError } = await serviceClient
-    .from('profiles')
-    .select('role')
-    .eq('id', userId)
-    .maybeSingle();
-  if (targetProfileError || targetProfile?.role !== expectedRole) {
-    return respond({ error: 'الحساب غير موجود أو نوعه غير صحيح.' }, 404);
+  if (action === 'set-password') {
+    const { data: targetProfile, error: targetProfileError } = await serviceClient
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    if (targetProfileError) {
+      console.error('تعذر التحقق من نوع الحساب لتغيير كلمة المرور:', targetProfileError.code);
+      return respond({ error: 'تعذر التحقق من نوع الحساب. حاول مرة أخرى.' }, 500);
+    }
+    if (!targetProfile) return respond({ error: 'ملف الحساب المرتبط غير موجود.' }, 404);
+    if (targetProfile.role !== accountType) {
+      console.error('نوع الحساب لا يطابق السجل المرتبط:', accountType, targetProfile.role);
+      return respond({ error: 'نوع الحساب لا يطابق السجل المرتبط.' }, 409);
+    }
   }
 
   if (action === 'set-password') {
@@ -341,7 +348,7 @@ Deno.serve(async (request) => {
         .eq('role', 'courier')
         .maybeSingle(),
     ]);
-  if (detailsError || courierProfileError || !details) {
+  if (detailsError || courierProfileError || !details || !profile) {
     console.error('تعذر تحميل بيانات هوية المندوب:', detailsError?.code ?? courierProfileError?.code);
     return respond({ error: 'بيانات الهوية أو صور المندوب غير مكتملة.' }, 404);
   }
