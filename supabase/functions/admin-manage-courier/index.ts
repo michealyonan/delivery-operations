@@ -65,12 +65,12 @@ Deno.serve(async (request) => {
     .eq('id', courierId)
     .single();
   if (courierError || !courier) return respond({ error: 'حساب المندوب غير موجود.' }, 404);
-  if (courier.is_active === isActive) return respond({ isActive });
 
   const authUpdate = await serviceClient.auth.admin.updateUserById(courier.user_id, {
     ban_duration: isActive ? 'none' : '876000h',
   });
   if (authUpdate.error) return respond({ error: 'تعذر تحديث حالة تسجيل الدخول للمندوب.' }, 500);
+  if (courier.is_active === isActive) return respond({ isActive });
 
   const { error: accountError } = await callerClient.rpc('admin_set_courier_active', {
     p_courier_id: courierId,

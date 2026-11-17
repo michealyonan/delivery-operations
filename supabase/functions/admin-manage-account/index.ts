@@ -355,7 +355,7 @@ Deno.serve(async (request) => {
 
   const { data: card, error: cardError } = await serviceClient.storage
     .from('courier-id-cards')
-    .createSignedUrl(details.id_card_path, 600);
+    .createSignedUrl(details.id_card_path, 3600);
   if (cardError) {
     console.error('تعذر إنشاء رابط صورة بطاقة المندوب:', cardError.message);
     return respond({ error: 'تعذر فتح صور الهوية الخاصة. حاول تحديث البيانات.' }, 500);
@@ -365,7 +365,7 @@ Deno.serve(async (request) => {
   if (profile?.profile_photo_path) {
     const { data: selfie, error: selfieError } = await serviceClient.storage
       .from('courier-profile-photos')
-      .createSignedUrl(profile.profile_photo_path, 600);
+      .createSignedUrl(profile.profile_photo_path, 3600);
     if (selfieError) {
       console.error('تعذر إنشاء رابط صورة سيلفي المندوب:', selfieError.message);
       return respond({ error: 'تعذر فتح صور الهوية الخاصة. حاول تحديث البيانات.' }, 500);

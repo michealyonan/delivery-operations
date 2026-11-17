@@ -168,6 +168,28 @@ function asNumber(value: unknown) {
   return typeof value === 'number' ? value : Number(value ?? 0);
 }
 
+function isCourierPrivateDetails(value: unknown): value is CourierPrivateDetails {
+  if (!value || typeof value !== 'object') return false;
+  const details = value as Record<string, unknown>;
+  return (
+    typeof details.id === 'number' &&
+    typeof details.code === 'string' &&
+    typeof details.fullName === 'string' &&
+    typeof details.email === 'string' &&
+    typeof details.phone === 'string' &&
+    typeof details.nationalId === 'string' &&
+    typeof details.address === 'string' &&
+    typeof details.idCardUrl === 'string' &&
+    (details.selfieUrl === undefined || typeof details.selfieUrl === 'string') &&
+    typeof details.isActive === 'boolean' &&
+    typeof details.isOnShift === 'boolean' &&
+    (details.breakUntil === undefined || typeof details.breakUntil === 'string') &&
+    typeof details.contractStartDate === 'string' &&
+    typeof details.contractEndDate === 'string' &&
+    (details.terminatedAt === undefined || typeof details.terminatedAt === 'string')
+  );
+}
+
 function mapOrder(row: Record<string, unknown>): DeliveryOrder {
   return {
     id: String(row.id),
@@ -1137,8 +1159,33 @@ export function AppProvider({ children }: PropsWithChildren) {
         }
         throw error;
       }
-      if (typeof data?.error === 'string') throw new Error(data.error);
-      await refresh();
+      if (data?.isActive !== active) {
+        throw new Error(
+          typeof data?.error === 'string' ? data.error : 'لم يؤكد الخادم تغيير حالة الحساب.',
+        );
+      }
+      setCouriers((current) =>
+        current.map((item) =>
+          item.id === courierId
+            ? {
+                ...item,
+                isActive: active,
+                isOnShift: active && item.isOnShift,
+                isOnBreak: active && item.isOnBreak,
+                breakUntil: active ? item.breakUntil : undefined,
+              }
+            : item,
+        ),
+      );
+      try {
+        await refresh();
+      } catch (error) {
+        throw new Error(
+          `تم ${active ? 'تفعيل' : 'إيقاف'} الحساب، لكن تعذر تحديث بقية البيانات. حدّث القائمة يدويًا. ${
+            error instanceof Error ? error.message : ''
+          }`.trim(),
+        );
+      }
     },
     [couriers, isDemo, orders, profile, refresh],
   );
@@ -1354,74 +1401,14 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       if (isDemo) throw new Error('بيانات الهوية غير متاحة في المعاينة.');
 
-      const client = assertBackend();
-      const { data: courier, error: courierError } = await client
-        .from('couriers')
-        .select('id, courier_code, user_id, full_name, email, phone, is_active, contract_start_date, contract_end_date, terminated_at')
-        .eq('id', courierId)
-        .maybeSingle();
-      if (courierError) throw courierError;
-      if (!courier) throw new Error('حساب المندوب غير موجود؛ حدّث قائمة المندوبين وحاول مرة أخرى.');
-
-      const [
-        { data: privateDetails, error: detailsError },
-        { data: accountProfile, error: profileError },
-        { data: presence, error: presenceError },
-      ] = await Promise.all([
-        client
-          .from('courier_private_details')
-          .select('national_id, address, id_card_path')
-          .eq('courier_id', courierId)
-          .maybeSingle(),
-        client
-          .from('profiles')
-          .select('profile_photo_path')
-          .eq('id', courier.user_id)
-          .maybeSingle(),
-        client
-          .from('courier_presence')
-          .select('is_on_shift, break_until')
-          .eq('courier_id', courierId)
-          .maybeSingle(),
-      ]);
-      if (detailsError) throw detailsError;
-      if (profileError) throw profileError;
-      if (presenceError) throw presenceError;
-      if (!privateDetails || !accountProfile) {
-        throw new Error('بيانات الهوية أو صور المندوب غير مكتملة. راجع ملفه أو حدّث بياناته.');
+      const { data, error } = await assertBackend().functions.invoke('admin-manage-account', {
+        body: { action: 'get-courier-details', accountType: 'courier', accountId: courierId },
+      });
+      if (error) throw new Error(await getAccountFunctionErrorMessage(error));
+      if (!isCourierPrivateDetails(data)) {
+        throw new Error('لم تصل بيانات ملف المندوب كاملة. أعد تحميل الملف أو حدّث التطبيق.');
       }
-
-      const { data: card, error: cardError } = await client.storage
-        .from('courier-id-cards')
-        .createSignedUrl(privateDetails.id_card_path, 600);
-      if (cardError) throw cardError;
-
-      let selfieUrl: string | undefined;
-      if (accountProfile.profile_photo_path) {
-        const { data: selfie, error: selfieError } = await client.storage
-          .from('courier-profile-photos')
-          .createSignedUrl(accountProfile.profile_photo_path, 600);
-        if (selfieError) throw selfieError;
-        selfieUrl = selfie.signedUrl;
-      }
-
-      return {
-        id: asNumber(courier.id),
-        code: courier.courier_code,
-        fullName: courier.full_name,
-        email: courier.email,
-        phone: courier.phone,
-        nationalId: privateDetails.national_id,
-        address: privateDetails.address,
-        idCardUrl: card.signedUrl,
-        ...(selfieUrl ? { selfieUrl } : {}),
-        isActive: courier.is_active,
-        isOnShift: Boolean(presence?.is_on_shift),
-        ...(presence?.break_until ? { breakUntil: presence.break_until } : {}),
-        contractStartDate: courier.contract_start_date,
-        contractEndDate: courier.contract_end_date,
-        ...(courier.terminated_at ? { terminatedAt: courier.terminated_at } : {}),
-      } satisfies CourierPrivateDetails;
+      return data;
     },
     [isDemo, profile],
   );
