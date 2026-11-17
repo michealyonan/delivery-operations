@@ -49,6 +49,10 @@ export default function OrderDetailScreen() {
   } = useApp();
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
   const orderReturn = orderReturns.find((item) => item.orderId === id);
+  const canCourierViewOrderTimes =
+    order?.status === 'delivered' ||
+    orderReturn?.status === 'returned_by_courier' ||
+    orderReturn?.status === 'closed';
   const courierDidNotAccept = orderAssignmentAttempts.some(
     (attempt) =>
       attempt.orderId === id &&
@@ -311,12 +315,17 @@ export default function OrderDetailScreen() {
         ) : null}
       </Section>
 
-      <Section title="مواعيد الطلب">
-        <Body>إرسال المطعم للطلب: {formatOrderTime(order.createdAt)}</Body>
-        <Body>إرسال الإدارة للمندوب: {formatOrderTime(order.assignedAt)}</Body>
-        <Body>قبول المندوب للطلب: {formatOrderTime(order.acceptedAt)}</Body>
-        <Body>تسليم الطلب للعميل: {formatOrderTime(order.deliveredAt)}</Body>
-      </Section>
+      {(profile?.role !== 'courier' || canCourierViewOrderTimes) && (
+        <Section title="مواعيد الطلب">
+          <Body>إرسال المطعم للطلب: {formatOrderTime(order.createdAt)}</Body>
+          <Body>إرسال الإدارة للمندوب: {formatOrderTime(order.assignedAt)}</Body>
+          <Body>قبول المندوب للطلب: {formatOrderTime(order.acceptedAt)}</Body>
+          <Body>تسليم الطلب للعميل: {formatOrderTime(order.deliveredAt)}</Body>
+          {orderReturn?.returnedAt ? (
+            <Body>إرجاع الطلب للمطعم: {formatOrderTime(orderReturn.returnedAt)}</Body>
+          ) : null}
+        </Section>
+      )}
 
       <Section title="العميل">
         <Body>{order.customerName}</Body>
