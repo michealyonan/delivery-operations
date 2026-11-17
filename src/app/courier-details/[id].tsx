@@ -3,12 +3,12 @@ import type { ImagePickerAsset } from 'expo-image-picker';
 import { useCallback, useEffect, useState } from 'react';
 import { Image, Platform, StyleSheet, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, Section, Subheading } from '../../../components/ui';
-import { BreakCountdown } from '../../../components/break-countdown';
-import { Alert } from '../../../lib/platform-alert';
-import { useApp, toImagePickerInput } from '../../../state/app-context';
-import { colors } from '../../../theme';
-import type { CourierPrivateDetails } from '../../../types';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, Subheading } from '../../components/ui';
+import { BreakCountdown } from '../../components/break-countdown';
+import { Alert } from '../../lib/platform-alert';
+import { useApp, toImagePickerInput } from '../../state/app-context';
+import { colors } from '../../theme';
+import type { CourierPrivateDetails } from '../../types';
 
 function formatDate(value: string) {
   const date = new Date(`${value.slice(0, 10)}T00:00:00`);
