@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Image, StyleSheet, View } from 'react-native';
 
-import { ActionButton, Body, Heading, Notice, Page, Section } from '../../components/ui';
+import { ActionButton, Body, Heading, Notice, Page, Section, Subheading } from '../../components/ui';
 import { useApp } from '../../state/app-context';
+import { colors, spacing } from '../../theme';
 
 export default function ProfileScreen() {
   const { profile, isDemo, signOut } = useApp();
@@ -24,6 +25,16 @@ export default function ProfileScreen() {
   return (
     <Page>
       <Heading>حسابي</Heading>
+      {profile?.role === 'courier' && profile.profilePhotoUrl ? (
+        <View style={styles.photoSection}>
+          <Subheading>الصورة الشخصية</Subheading>
+          <Image
+            accessibilityLabel="صورة المندوب الشخصية"
+            source={{ uri: profile.profilePhotoUrl }}
+            style={styles.profilePhoto}
+          />
+        </View>
+      ) : null}
       <Section title="بيانات الحساب">
         <Body>{profile?.name}</Body>
         <Body>
@@ -45,3 +56,13 @@ export default function ProfileScreen() {
     </Page>
   );
 }
+
+const styles = StyleSheet.create({
+  photoSection: { alignItems: 'center', gap: spacing.sm },
+  profilePhoto: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: colors.surfaceRaised,
+  },
+});

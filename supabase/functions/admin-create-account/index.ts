@@ -79,9 +79,11 @@ Deno.serve(async (request) => {
 
   let nationalId = '';
   let idCardPath = '';
+  let selfiePath = '';
   if (role === 'courier') {
     nationalId = typeof payload.nationalId === 'string' ? payload.nationalId.trim() : '';
     idCardPath = typeof payload.idCardPath === 'string' ? payload.idCardPath.trim() : '';
+    selfiePath = typeof payload.selfiePath === 'string' ? payload.selfiePath.trim() : '';
     if (fullName.split(/\s+/).length < 4) {
       return respond({ error: 'اكتب الاسم الرباعي للمندوب.' }, 400);
     }
@@ -91,10 +93,17 @@ Deno.serve(async (request) => {
     if (!idCardPath.startsWith(`${callerData.user.id}/`) || idCardPath.includes('..')) {
       return respond({ error: 'مسار صورة البطاقة غير صالح.' }, 400);
     }
+    if (!selfiePath.startsWith(`${callerData.user.id}/`) || selfiePath.includes('..')) {
+      return respond({ error: 'مسار صورة السيلفي غير صالح.' }, 400);
+    }
     const { error: cardError } = await serviceClient.storage
       .from('courier-id-cards')
       .createSignedUrl(idCardPath, 1);
     if (cardError) return respond({ error: 'تعذر التحقق من صورة البطاقة الخاصة.' }, 400);
+    const { error: selfieError } = await serviceClient.storage
+      .from('courier-profile-photos')
+      .createSignedUrl(selfiePath, 1);
+    if (selfieError) return respond({ error: 'تعذر التحقق من صورة السيلفي الخاصة.' }, 400);
   }
 
   const temporaryPassword = makeTemporaryPassword();
@@ -119,6 +128,7 @@ Deno.serve(async (request) => {
     full_name: fullName,
     email,
     phone,
+    profile_photo_path: role === 'courier' ? selfiePath : null,
   });
   if (profileInsert.error) {
     accountError = 'تعذر حفظ ملف الحساب.';
@@ -173,19 +183,24 @@ Deno.serve(async (request) => {
   }
 
   if (accountError) {
-    const { error: deleteUserError } = await serviceClient.auth.admin.deleteUser(created.user.id);
+    const cleanupErrors: string[] = [];
     if (role === 'courier') {
       const { error: removeCardError } = await serviceClient.storage
         .from('courier-id-cards')
         .remove([idCardPath]);
-      if (removeCardError) {
-        return respond({ error: `${accountError} وتعذر حذف صورة البطاقة المؤقتة.` }, 500);
-      }
+      if (removeCardError) cleanupErrors.push('تعذر حذف صورة البطاقة المؤقتة.');
+      const { error: removeSelfieError } = await serviceClient.storage
+        .from('courier-profile-photos')
+        .remove([selfiePath]);
+      if (removeSelfieError) cleanupErrors.push('تعذر حذف صورة السيلفي المؤقتة.');
     }
+    const { error: deleteUserError } = await serviceClient.auth.admin.deleteUser(created.user.id);
     if (deleteUserError) {
-      return respond({ error: `${accountError} وتعذر تنظيف حساب الدخول الجزئي.` }, 500);
+      cleanupErrors.push('تعذر تنظيف حساب الدخول الجزئي.');
     }
-    return respond({ error: accountError }, 500);
+    return respond({
+      error: cleanupErrors.length ? `${accountError} ${cleanupErrors.join(' ')}` : accountError,
+    }, 500);
   }
 
   return respond({ code: accountCode, email, temporaryPassword });

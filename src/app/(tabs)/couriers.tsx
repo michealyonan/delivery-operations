@@ -17,9 +17,11 @@ export default function CouriersScreen() {
   const [nationalId, setNationalId] = useState('');
   const [address, setAddress] = useState('');
   const [card, setCard] = useState<ImagePickerAsset | null>(null);
+  const [selfie, setSelfie] = useState<ImagePickerAsset | null>(null);
   const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
   const [busy, setBusy] = useState(false);
   const [busyCourierId, setBusyCourierId] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const toggleCourier = (courierId: number, isActive: boolean) => {
     const nextActive = !isActive;
@@ -49,43 +51,57 @@ export default function CouriersScreen() {
     ]);
   };
 
-  const pickIdCard = async () => {
-    const ImagePicker = await import('expo-image-picker');
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 0.72,
-      base64: true,
-    });
-    if (result.canceled) return;
-    const asset = result.assets[0];
-    if (!asset.base64) {
-      Alert.alert('تعذر قراءة الصورة', 'اختر صورة أخرى للبطاقة.');
-      return;
+  const pickImage = async (
+    setImage: (asset: ImagePickerAsset) => void,
+    description: string,
+  ) => {
+    try {
+      const ImagePicker = await import('expo-image-picker');
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.72,
+        base64: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset.base64) {
+        setErrorMessage(`تعذر قراءة ${description}؛ اختر صورة أخرى.`);
+        return;
+      }
+      if (asset.fileSize && asset.fileSize > 8 * 1024 * 1024) {
+        setErrorMessage(`حجم ${description} يجب أن يكون أقل من 8 ميجابايت.`);
+        return;
+      }
+      setImage(asset);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : `تعذر اختيار ${description}. حاول مرة أخرى.`,
+      );
     }
-    if (asset.fileSize && asset.fileSize > 8 * 1024 * 1024) {
-      Alert.alert('الصورة كبيرة', 'اختر صورة حجمها أقل من 8 ميجابايت.');
-      return;
-    }
-    setCard(asset);
   };
 
+  const pickIdCard = () => pickImage(setCard, 'صورة البطاقة');
+  const pickSelfie = () => pickImage(setSelfie, 'صورة السيلفي');
+
   const submit = async () => {
+    setErrorMessage('');
     const words = fullName.trim().split(/\s+/).filter(Boolean);
     if (words.length < 4) {
-      Alert.alert('الاسم غير مكتمل', 'اكتب الاسم الرباعي للمندوب.');
+      setErrorMessage('اكتب الاسم الرباعي للمندوب.');
       return;
     }
     if (!/^\d{14}$/.test(nationalId.trim())) {
-      Alert.alert('الرقم القومي غير صحيح', 'يجب أن يتكون الرقم القومي المصري من 14 رقمًا.');
+      setErrorMessage('يجب أن يتكون الرقم القومي المصري من 14 رقمًا.');
       return;
     }
     if (!/^[+\d][\d\s-]{7,16}$/.test(phone.trim())) {
-      Alert.alert('رقم التليفون غير صحيح', 'اكتب رقم تليفون صالحًا للمندوب.');
+      setErrorMessage('اكتب رقم تليفون صالحًا للمندوب.');
       return;
     }
-    if (!email.trim() || !address.trim() || !card) {
-      Alert.alert('بيانات ناقصة', 'أدخل البريد والعنوان وارفع صورة البطاقة.');
+    if (!email.trim() || !address.trim() || !card || !selfie) {
+      setErrorMessage('أدخل البريد والعنوان وارفع صورة البطاقة وصورة السيلفي.');
       return;
     }
     setBusy(true);
@@ -97,6 +113,7 @@ export default function CouriersScreen() {
         nationalId: nationalId.trim(),
         address: address.trim(),
         idCard: toImagePickerInput(card),
+        selfie: toImagePickerInput(selfie),
       });
       setCredentials(created);
       setFullName('');
@@ -105,9 +122,10 @@ export default function CouriersScreen() {
       setNationalId('');
       setAddress('');
       setCard(null);
-      Alert.alert('تم إنشاء الحساب', `رقم المندوب الثابت: ${created.code}`);
+      setSelfie(null);
+      setErrorMessage('');
     } catch (error) {
-      Alert.alert('تعذر إنشاء الحساب', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      setErrorMessage(error instanceof Error ? error.message : 'تعذر إنشاء الحساب. حاول مرة أخرى.');
     } finally {
       setBusy(false);
     }
@@ -219,7 +237,13 @@ export default function CouriersScreen() {
           {card ? 'تغيير صورة البطاقة' : 'اختيار صورة البطاقة'}
         </ActionButton>
         {card?.uri ? <Image source={{ uri: card.uri }} style={styles.cardPreview} /> : null}
+        <ActionButton onPress={pickSelfie} tone="outline">
+          {selfie ? 'تغيير صورة السيلفي' : 'اختيار صورة سيلفي للمندوب'}
+        </ActionButton>
+        {selfie?.uri ? <Image source={{ uri: selfie.uri }} style={styles.selfiePreview} /> : null}
         <Notice>تُرفع الصورة إلى مساحة تخزين خاصة؛ لا تُحفظ في ملفات عامة أو سجلات التطبيق.</Notice>
+        <Notice tone="info">صورة السيلفي مطلوبة وستظهر للمندوب في صفحة حسابي.</Notice>
+        {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
         <ActionButton loading={busy} onPress={submit}>
           إنشاء الحساب ورقم المندوب
         </ActionButton>
@@ -242,4 +266,11 @@ const styles = StyleSheet.create({
   name: { color: colors.text, fontSize: 16, fontWeight: '700', textAlign: 'right' },
   detail: { color: colors.muted, fontSize: 13, textAlign: 'right', writingDirection: 'rtl' },
   cardPreview: { width: '100%', height: 190, borderRadius: 14, resizeMode: 'contain', backgroundColor: colors.surfaceRaised },
+  selfiePreview: {
+    width: 112,
+    height: 112,
+    alignSelf: 'center',
+    borderRadius: 56,
+    backgroundColor: colors.surfaceRaised,
+  },
 });

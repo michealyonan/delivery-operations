@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../../components/ui';
 import { useApp } from '../../../state/app-context';
@@ -15,12 +15,15 @@ export default function SupportStaffScreen() {
   const [phone, setPhone] = useState('');
   const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const load = useCallback(async () => {
     try {
       setAgents(await listSupportAgents());
     } catch (error) {
-      Alert.alert('تعذر تحميل موظفي الدعم', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      setErrorMessage(
+        error instanceof Error ? error.message : 'تعذر تحميل موظفي الدعم. حاول مرة أخرى.',
+      );
     }
   }, [listSupportAgents]);
 
@@ -32,6 +35,7 @@ export default function SupportStaffScreen() {
   }, [load]);
 
   const submit = async () => {
+    setErrorMessage('');
     setBusy(true);
     try {
       const created = await createSupportAgent({ fullName, email, phone });
@@ -41,7 +45,9 @@ export default function SupportStaffScreen() {
       setPhone('');
       await load();
     } catch (error) {
-      Alert.alert('تعذر إنشاء حساب الدعم', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      setErrorMessage(
+        error instanceof Error ? error.message : 'تعذر إنشاء حساب الدعم. حاول مرة أخرى.',
+      );
     } finally {
       setBusy(false);
     }
@@ -99,6 +105,7 @@ export default function SupportStaffScreen() {
           onChangeText={setPhone}
           value={phone}
         />
+        {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
         <ActionButton
           disabled={!fullName.trim() || !email.trim() || !phone.trim()}
           loading={busy}

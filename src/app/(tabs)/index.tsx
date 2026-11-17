@@ -147,7 +147,7 @@ function AdminHome() {
       <ActionButton onPress={() => router.push('/(tabs)/couriers')} tone="secondary">
         إدارة حسابات المندوبين
       </ActionButton>
-      <ActionButton onPress={() => router.push('/(tabs)/reports')} tone="outline">
+      <ActionButton onPress={() => router.navigate('/reports')} tone="outline">
         فتح التقارير
       </ActionButton>
       <ActionButton onPress={() => router.push('/(tabs)/support')} tone="outline">

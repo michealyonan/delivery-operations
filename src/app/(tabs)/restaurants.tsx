@@ -15,10 +15,12 @@ export default function RestaurantsScreen() {
   const [address, setAddress] = useState('');
   const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const submit = async () => {
+    setErrorMessage('');
     if (!name.trim() || !email.trim() || !phone.trim() || !address.trim()) {
-      Alert.alert('بيانات ناقصة', 'أدخل اسم المطعم والبريد ورقم التليفون والعنوان.');
+      setErrorMessage('أدخل اسم المطعم والبريد ورقم التليفون والعنوان.');
       return;
     }
     setBusy(true);
@@ -29,9 +31,9 @@ export default function RestaurantsScreen() {
       setEmail('');
       setPhone('');
       setAddress('');
-      Alert.alert('تم إنشاء حساب المطعم', `رقم المطعم الثابت: ${created.code}`);
+      setErrorMessage('');
     } catch (error) {
-      Alert.alert('تعذر إنشاء الحساب', error instanceof Error ? error.message : 'حاول مرة أخرى.');
+      setErrorMessage(error instanceof Error ? error.message : 'تعذر إنشاء حساب المطعم. حاول مرة أخرى.');
     } finally {
       setBusy(false);
     }
@@ -64,6 +66,7 @@ export default function RestaurantsScreen() {
             <Field keyboardType="phone-pad" label="رقم التليفون" onChangeText={setPhone} value={phone} />
             <Field label="عنوان المطعم" multiline onChangeText={setAddress} value={address} />
             <Body>بعد الدخول من داخل المطعم، يمكن حفظ موقعه الحالي ليظهر للمندوب.</Body>
+            {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
             <ActionButton loading={busy} onPress={submit}>إنشاء حساب المطعم</ActionButton>
           </Section>
         </>

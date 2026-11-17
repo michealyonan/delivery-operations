@@ -1,7 +1,8 @@
+import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Body, Field, Heading, Notice, Page, Section } from '../../components/ui';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section } from '../../components/ui';
 import { useApp } from '../../state/app-context';
 import { colors, spacing } from '../../theme';
 import type { DeliveryOrder } from '../../types';
@@ -18,7 +19,7 @@ function inRange(order: DeliveryOrder, mode: 'day' | 'month', filter: string) {
 }
 
 export default function ReportsScreen() {
-  const { orders, couriers } = useApp();
+  const { orders, couriers, profile } = useApp();
   const now = new Date();
   const [mode, setMode] = useState<'day' | 'month'>('day');
   const [filter, setFilter] = useState(
@@ -41,6 +42,16 @@ export default function ReportsScreen() {
       paid: courierOrders.reduce((total, order) => total + (order.paidToRestaurantPiasters ?? 0), 0),
     };
   });
+
+  if (profile?.role !== 'admin') {
+    return (
+      <Page>
+        <Heading>التقارير</Heading>
+        <Notice tone="danger">التقارير متاحة لحساب الإدارة فقط.</Notice>
+        <ActionButton onPress={() => router.back()} tone="outline">رجوع</ActionButton>
+      </Page>
+    );
+  }
 
   return (
     <Page>

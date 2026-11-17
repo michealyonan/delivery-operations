@@ -80,7 +80,7 @@ export default function TabLayout() {
         name="reports"
         options={{
           title: 'التقارير',
-          href: null,
+          href: admin ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="chart-box-outline" color={String(color)} size={size} />
           ),

@@ -16,6 +16,7 @@ export interface AppProfile {
   name: string;
   email?: string;
   phone?: string;
+  profilePhotoUrl?: string;
   restaurantId?: number;
   restaurantAddress?: string;
   restaurantLatitude?: number;
@@ -100,6 +101,11 @@ export interface NewCourierInput {
   nationalId: string;
   address: string;
   idCard: {
+    base64: string;
+    mimeType: string;
+    fileSize?: number;
+  };
+  selfie: {
     base64: string;
     mimeType: string;
     fileSize?: number;

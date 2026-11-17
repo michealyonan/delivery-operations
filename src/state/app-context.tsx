@@ -92,6 +92,22 @@ function assertBackend() {
   return supabase;
 }
 
+async function getAccountFunctionErrorMessage(error: unknown) {
+  if (error && typeof error === 'object' && 'context' in error) {
+    const response = error.context;
+    if (typeof Response !== 'undefined' && response instanceof Response) {
+      const payload = await response.clone().json().catch(() => null);
+      if (typeof payload?.error === 'string') return payload.error;
+      if (typeof payload?.message === 'string') return payload.message;
+      if (response.status === 401) return 'انتهت جلسة الدخول. سجّل الخروج ثم ادخل مرة أخرى.';
+      if (response.status === 403) {
+        return 'لم يقبل الخادم صلاحيات الإدارة. تأكد من الدخول بحساب الإدارة.';
+      }
+    }
+  }
+  return error instanceof Error ? error.message : 'تعذر إنشاء الحساب. حاول مرة أخرى.';
+}
+
 function asNumber(value: unknown) {
   return typeof value === 'number' ? value : Number(value ?? 0);
 }
@@ -178,7 +194,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     const client = assertBackend();
     const { data: record, error } = await client
       .from('profiles')
-      .select('id, role, full_name, email, phone')
+      .select('id, role, full_name, email, phone, profile_photo_path')
       .eq('id', userId)
       .single();
     if (error) throw error;
@@ -201,6 +217,14 @@ export function AppProvider({ children }: PropsWithChildren) {
         .eq('user_id', userId)
         .single();
       if (courierError) throw courierError;
+      let profilePhotoUrl: string | undefined;
+      if (record.profile_photo_path) {
+        const { data: photo, error: photoError } = await client.storage
+          .from('courier-profile-photos')
+          .createSignedUrl(record.profile_photo_path, 60 * 60 * 24);
+        if (photoError) throw photoError;
+        profilePhotoUrl = photo.signedUrl;
+      }
       const { data: presence, error: presenceError } = await client
         .from('courier_presence')
         .select('is_on_shift')
@@ -211,6 +235,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         ...base,
         courierId: asNumber(courier.id),
         courierCode: courier.courier_code,
+        profilePhotoUrl,
         isOnShift: Boolean(presence?.is_on_shift),
       };
     }
@@ -516,6 +541,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       if (input.idCard.fileSize && input.idCard.fileSize > 8 * 1024 * 1024) {
         throw new Error('حجم صورة البطاقة أكبر من 8 ميجابايت.');
       }
+      if (input.selfie.fileSize && input.selfie.fileSize > 8 * 1024 * 1024) {
+        throw new Error('حجم صورة السيلفي أكبر من 8 ميجابايت.');
+      }
 
       const extension = input.idCard.mimeType.includes('png') ? 'png' : 'jpg';
       const path = `${profile.id}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
@@ -527,6 +555,24 @@ export function AppProvider({ children }: PropsWithChildren) {
         });
       if (uploadError) throw uploadError;
 
+      const selfieExtension = input.selfie.mimeType.includes('png') ? 'png' : 'jpg';
+      const selfiePath = `${profile.id}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${selfieExtension}`;
+      const { error: selfieUploadError } = await client.storage
+        .from('courier-profile-photos')
+        .upload(selfiePath, decode(input.selfie.base64), {
+          contentType: input.selfie.mimeType,
+          upsert: false,
+        });
+      if (selfieUploadError) {
+        const { error: cleanupError } = await client.storage
+          .from('courier-id-cards')
+          .remove([path]);
+        if (cleanupError) {
+          throw new Error(`${selfieUploadError.message} وتعذر حذف صورة البطاقة المؤقتة.`);
+        }
+        throw selfieUploadError;
+      }
+
       const { data, error } = await client.functions.invoke('admin-create-account', {
         body: {
           role: 'courier',
@@ -536,15 +582,21 @@ export function AppProvider({ children }: PropsWithChildren) {
           nationalId: input.nationalId.trim(),
           address: input.address.trim(),
           idCardPath: path,
+          selfiePath,
         },
       });
       if (error || !data?.code || !data?.temporaryPassword) {
-        const { error: cleanupError } = await client.storage
+        const { error: cardCleanupError } = await client.storage
           .from('courier-id-cards')
           .remove([path]);
-        const reason = error?.message ?? 'لم يرجع الخادم بيانات الحساب.';
-        if (cleanupError) {
-          throw new Error(`${reason} وتعذر حذف صورة البطاقة المؤقتة؛ راجع التخزين الخاص.`);
+        const { error: selfieCleanupError } = await client.storage
+          .from('courier-profile-photos')
+          .remove([selfiePath]);
+        const reason = error
+          ? await getAccountFunctionErrorMessage(error)
+          : 'لم يرجع الخادم بيانات الحساب.';
+        if (cardCleanupError || selfieCleanupError) {
+          throw new Error(`${reason} وتعذر حذف صورة مؤقتة؛ راجع التخزين الخاص.`);
         }
         throw new Error(reason);
       }
@@ -577,7 +629,11 @@ export function AppProvider({ children }: PropsWithChildren) {
         },
       });
       if (error || !data?.code || !data?.temporaryPassword) {
-        throw new Error(error?.message ?? 'لم يرجع الخادم بيانات الحساب.');
+        throw new Error(
+          error
+            ? await getAccountFunctionErrorMessage(error)
+            : 'لم يرجع الخادم بيانات الحساب.',
+        );
       }
       await refresh();
       return {
@@ -966,13 +1022,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       const { data, error } = await assertBackend().functions.invoke('admin-create-account', {
         body: { role: 'support', email, fullName, phone },
       });
-      if (error) {
-        if (error.context instanceof Response) {
-          const response = await error.context.json().catch(() => null);
-          if (typeof response?.error === 'string') throw new Error(response.error);
-        }
-        throw error;
-      }
+      if (error) throw new Error(await getAccountFunctionErrorMessage(error));
       if (!data?.code || !data?.temporaryPassword || !data?.email) {
         throw new Error('لم يرجع الخادم بيانات الحساب المؤقتة.');
       }
