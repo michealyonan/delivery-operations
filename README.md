@@ -14,7 +14,7 @@
 ## إعداد Supabase قبل استخدام بيانات حقيقية
 
 1. أنشئ مشروع Supabase، ثم انسخ `.env.example` إلى `.env` وأدخل عنوان المشروع و`anon key` فقط في متغيرات `EXPO_PUBLIC_`.
-2. طبّق ملفات `supabase/migrations/` بالترتيب الزمني، أو نفّذ `npx supabase db push` بعد ربط المشروع.
+2. طبّق ملفات `supabase/migrations/` بالترتيب الزمني، أو نفّذ `npx supabase db push` بعد ربط المشروع. يحتاج إنشاء الحسابات إلى صلاحيات `service_role` المحددة في الترحيل `20261117040000_account_creation_service_role_grants.sql`.
 3. أنشئ أول مستخدم إدارة من Auth، ثم أضف سجله إلى `public.profiles` باستخدام قالب `supabase/seed.sql`.
 4. ثبّت Supabase CLI وسجّل الدخول، ثم اربط المشروع وانشر Edge Function:
 
