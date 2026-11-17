@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Delivery Operations",
+    "slug": "delivery-operations",
+    "scheme": "deliveryops",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "يحتاج التطبيق إلى إذن الموقع لعرض موقعك وتتبع الطلبات أثناء التوصيل.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "يحتاج التطبيق إلى الموقع لعرض موقع المندوب أثناء التوصيل.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "إذن الموقع الخلفي مطلوب للتتبع المستمر خلال التوصيل.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.deliveryapp.operations",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    }
+  }
+}
