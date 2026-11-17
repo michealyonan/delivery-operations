@@ -43,12 +43,16 @@ Deno.serve(async (request) => {
   const { data: callerData, error: callerError } = await callerClient.auth.getUser();
   if (callerError || !callerData.user) return respond({ error: 'جلسة الدخول غير صالحة.' }, 401);
 
-  const { data: callerProfile, error: profileError } = await serviceClient
+  const { data: callerProfile, error: profileError } = await callerClient
     .from('profiles')
     .select('role')
     .eq('id', callerData.user.id)
-    .single();
-  if (profileError || callerProfile?.role !== 'admin') {
+    .maybeSingle();
+  if (profileError) {
+    console.error('تعذر التحقق من دور مدير الحسابات:', profileError.code);
+    return respond({ error: 'تعذر التحقق من صلاحيات الحساب. حاول مرة أخرى.' }, 500);
+  }
+  if (callerProfile?.role !== 'admin') {
     return respond({ error: 'إنشاء الحسابات متاح للإدارة فقط.' }, 403);
   }
 
