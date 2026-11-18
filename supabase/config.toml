@@ -9,3 +9,6 @@ verify_jwt = false
 
 [functions.notify-unbooked-couriers]
 verify_jwt = true
+
+[functions.send-courier-notification]
+verify_jwt = true

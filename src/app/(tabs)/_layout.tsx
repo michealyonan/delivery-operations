@@ -1,12 +1,21 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Redirect, Tabs } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Redirect, router, Tabs, type Href } from 'expo-router';
+import { useEffect, useState, type ComponentProps } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionButton, Notice } from '../../components/ui';
 import { useApp } from '../../state/app-context';
 import { colors } from '../../theme';
+
+type MenuItem = {
+  name: string;
+  href: Href;
+  title: string;
+  icon: ComponentProps<typeof MaterialCommunityIcons>['name'];
+  visible: boolean;
+  badge?: number;
+};
 
 export default function TabLayout() {
   const {
@@ -15,6 +24,7 @@ export default function TabLayout() {
     orderAssignmentAttempts,
     orderReturns,
     orderTransferRequests,
+    courierNotifications,
     shiftSlots,
     shiftBookings,
     shiftRecords,
@@ -24,6 +34,7 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const [now, setNow] = useState<number | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     const firstUpdate = setTimeout(() => setNow(Date.now()), 0);
     const timer = setInterval(() => setNow(Date.now()), 15_000);
@@ -49,6 +60,9 @@ export default function TabLayout() {
   const pendingTransferCount = orderTransferRequests.filter(
     (request) => request.status === 'pending',
   ).length;
+  const unreadNotificationCount = courierNotifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
   const lateShiftCount = shiftBookings.filter((booking) => {
     if (booking.status !== 'booked' && booking.status !== 'swap_listed') return false;
     const slot = shiftSlots.find((item) => item.id === booking.slotId);
@@ -72,6 +86,75 @@ export default function TabLayout() {
     }
   };
 
+  const menuItems = ([
+    { name: 'index', href: '/(tabs)', title: 'الرئيسية', icon: 'view-dashboard-outline', visible: !supportOnly },
+    { name: 'orders', href: '/(tabs)/orders', title: 'الطلبات', icon: 'clipboard-list-outline', visible: !supportOnly },
+    {
+      name: 'unaccepted-orders',
+      href: '/(tabs)/unaccepted-orders',
+      title: 'عدم القبول',
+      icon: 'clipboard-alert-outline',
+      visible: admin || profile.role === 'courier',
+      badge: unacceptedCount,
+    },
+    {
+      name: 'transfers',
+      href: '/(tabs)/transfers',
+      title: 'التحويلات',
+      icon: 'swap-horizontal',
+      visible: admin || supportOnly,
+      badge: admin || supportOnly ? pendingTransferCount : 0,
+    },
+    { name: 'payments', href: '/(tabs)/payments', title: 'الدفعات', icon: 'cash-multiple', visible: !supportOnly },
+    {
+      name: 'shift-requests',
+      href: '/(tabs)/shift-requests',
+      title: 'طلبات الشيفت',
+      icon: 'account-clock-outline',
+      visible: admin,
+      badge: pendingShiftCloseCount,
+    },
+    { name: 'admin-shifts', href: '/(tabs)/admin-shifts', title: 'الشفتات', icon: 'calendar-clock-outline', visible: admin },
+    {
+      name: 'shift-delays',
+      href: '/(tabs)/shift-delays',
+      title: 'التأخيرات',
+      icon: 'account-alert-outline',
+      visible: admin,
+      badge: lateShiftCount,
+    },
+    { name: 'my-shifts', href: '/(tabs)/my-shifts', title: 'شيفتاتي', icon: 'calendar-check-outline', visible: profile.role === 'courier' },
+    {
+      name: 'notifications',
+      href: '/(tabs)/notifications',
+      title: 'إشعارات',
+      icon: 'bell-outline',
+      visible: admin || profile.role === 'courier',
+      badge: profile.role === 'courier' ? unreadNotificationCount : 0,
+    },
+    {
+      name: 'break-returns',
+      href: '/(tabs)/break-returns',
+      title: 'فك البريكات',
+      icon: 'account-arrow-left-outline',
+      visible: admin,
+      badge: activeBreakCount,
+    },
+    {
+      name: 'return-operations',
+      href: '/(tabs)/return-operations',
+      title: 'المرتجعات',
+      icon: 'keyboard-return',
+      visible: admin,
+      badge: openReturnCount,
+    },
+    { name: 'support', href: '/(tabs)/support', title: 'الدعم', icon: 'message-text-outline', visible: true },
+    { name: 'couriers', href: '/(tabs)/couriers', title: 'المندوبون', icon: 'motorbike', visible: admin },
+    { name: 'restaurants', href: '/(tabs)/restaurants', title: 'المطاعم', icon: 'storefront-outline', visible: admin },
+    { name: 'reports', href: '/(tabs)/reports', title: 'التقارير', icon: 'chart-box-outline', visible: admin },
+    { name: 'profile', href: '/(tabs)/profile', title: 'حسابي', icon: 'account-circle-outline', visible: !admin },
+  ] satisfies MenuItem[]).filter((item) => item.visible);
+
   return (
     <View style={styles.root}>
       {refreshError ? (
@@ -87,28 +170,13 @@ export default function TabLayout() {
           </ActionButton>
         </View>
       ) : null}
-      <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.muted,
-          tabBarStyle: {
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            backgroundColor: colors.surface,
-            borderTopColor: colors.outline,
-            borderTopWidth: StyleSheet.hairlineWidth,
-            height: 70 + insets.bottom,
-            paddingBottom: Math.max(insets.bottom, 8),
-            paddingTop: 6,
-            elevation: 8,
-            zIndex: 10,
-          },
-          tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
-        }}
-      >
+      <View style={[styles.tabsHost, { paddingBottom: 76 + insets.bottom }]}>
+        <Tabs
+          screenOptions={{
+            headerShown: false,
+            tabBarStyle: { display: 'none' },
+          }}
+        >
       <Tabs.Screen
         name="index"
         options={{
@@ -206,6 +274,20 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="notifications"
+        options={{
+          title: 'إشعارات',
+          href: admin || profile.role === 'courier' ? undefined : null,
+          tabBarBadge:
+            profile.role === 'courier' && unreadNotificationCount > 0
+              ? unreadNotificationCount
+              : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bell-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="break-returns"
         options={{
           title: 'فك البريكات',
@@ -288,17 +370,138 @@ export default function TabLayout() {
           ),
         }}
       />
-      </Tabs>
+        </Tabs>
+      </View>
+      {menuOpen ? (
+        <View style={styles.menuOverlay}>
+          <Pressable
+            accessibilityLabel="إغلاق قائمة التنقل"
+            onPress={() => setMenuOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={[styles.menuPanel, { bottom: Math.max(insets.bottom, 8) + 72 }]}>
+            <ScrollView contentContainerStyle={styles.menuList}>
+              {menuItems.map((item) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={item.name}
+                  onPress={() => {
+                    setMenuOpen(false);
+                    router.navigate(item.href);
+                  }}
+                  style={styles.menuItem}
+                >
+                  <MaterialCommunityIcons
+                    color={colors.primary}
+                    name={item.icon}
+                    size={22}
+                  />
+                  <Text style={styles.menuItemText}>{item.title}</Text>
+                  {item.badge && item.badge > 0 ? (
+                    <Text style={styles.menuBadge}>{item.badge}</Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: menuOpen }}
+        onPress={() => setMenuOpen((open) => !open)}
+        style={[styles.menuToggle, { bottom: Math.max(insets.bottom, 8) + 10 }]}
+      >
+        <MaterialCommunityIcons
+          color={colors.white}
+          name={menuOpen ? 'close' : 'menu'}
+          size={22}
+        />
+        <Text style={styles.menuToggleText}>{menuOpen ? 'إغلاق القائمة' : 'القائمة'}</Text>
+        <MaterialCommunityIcons
+          color={colors.white}
+          name={menuOpen ? 'chevron-down' : 'chevron-up'}
+          size={20}
+        />
+      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  tabsHost: { flex: 1 },
   refreshBanner: {
     paddingHorizontal: 16,
     paddingTop: 10,
     gap: 8,
     backgroundColor: colors.background,
+  },
+  menuOverlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 20,
+  },
+  menuPanel: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    maxHeight: 420,
+    overflow: 'hidden',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.outline,
+    backgroundColor: colors.surface,
+    elevation: 12,
+  },
+  menuList: {
+    paddingVertical: 6,
+  },
+  menuItem: {
+    minHeight: 50,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.outline,
+  },
+  menuItemText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  menuBadge: {
+    minWidth: 22,
+    overflow: 'hidden',
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: colors.danger,
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  menuToggle: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 21,
+    minHeight: 52,
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    backgroundColor: colors.primary,
+    elevation: 10,
+  },
+  menuToggleText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '800',
   },
 });

@@ -23,9 +23,11 @@
    npx supabase functions deploy admin-create-account
    npx supabase functions deploy admin-manage-courier
    npx supabase functions deploy admin-manage-account
+   npx supabase functions deploy send-courier-notification
    ```
 
    وظيفتا `admin-create-account` و`admin-manage-account` تتحققان بنفسيهما من جلسة المستخدم ودور الإدارة؛ لا تزل فحوص `Authorization` و`auth.getUser()` وصلاحية `admin` مع `verify_jwt = false`. المفتاح `service_role` يبقى في بيئة Supabase فقط ولا يوضع في التطبيق أو ملفات `.env` المرسلة للأجهزة.
+   إشعارات الهاتف تحتاج إلى development build؛ إشعارات Expo عن بُعد غير متاحة في Expo Go على Android.
 5. أنشئ حسابات المندوبين والمطاعم وموظفي الدعم من حساب الإدارة. كلمة المرور المؤقتة تظهر مرة واحدة؛ أرسلها لصاحب الحساب بقناة آمنة.
 6. في Supabase، افتح **Authentication > URL Configuration** وأضف رابط الاستعادة `https://michealyonan.github.io/delivery-operations/reset-password` إلى **Redirect URLs**. من صفحة الدخول يمكن طلب رابط استعادة إلى البريد؛ يعمل الرابط بعد السماح بعنوان إعادة التوجيه.
 

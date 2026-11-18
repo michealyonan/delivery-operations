@@ -67,6 +67,17 @@ export interface CourierFeeRemittance {
   receivedBy?: string;
 }
 
+export interface CourierNotification {
+  id: string;
+  title: string;
+  body: string;
+  imageUrl?: string;
+  createdAt: string;
+  expiresAt: string;
+  recipientCount: number;
+  readAt?: string;
+}
+
 export interface Courier {
   id: number;
   code: string;

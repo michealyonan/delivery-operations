@@ -8,16 +8,17 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppProvider } from '../state/app-context';
 import { colors } from '../theme';
 
-function useShiftNotificationNavigation() {
+function useNotificationNavigation() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
     let active = true;
     let subscription: { remove: () => void } | undefined;
-    const openShifts = (notification: {
+    const openDestination = (notification: {
       request: { content: { data?: Record<string, unknown> } };
     }) => {
-      if (notification.request.content.data?.url === '/(tabs)/my-shifts') {
-        router.push('/(tabs)/my-shifts');
+      const url = notification.request.content.data?.url;
+      if (url === '/(tabs)/my-shifts' || url === '/(tabs)/notifications') {
+        router.push(url);
       }
     };
     import('expo-notifications')
@@ -32,13 +33,13 @@ function useShiftNotificationNavigation() {
           }),
         });
         const lastResponse = Notifications.getLastNotificationResponse();
-        if (lastResponse) openShifts(lastResponse.notification);
+        if (lastResponse) openDestination(lastResponse.notification);
         subscription = Notifications.addNotificationResponseReceivedListener((response) =>
-          openShifts(response.notification),
+          openDestination(response.notification),
         );
       })
       .catch((error: unknown) => {
-        console.error('تعذر إعداد فتح صفحة الشفتات من الإشعار:', error);
+        console.error('تعذر إعداد فتح الصفحة من الإشعار:', error);
       });
     return () => {
       active = false;
@@ -48,7 +49,7 @@ function useShiftNotificationNavigation() {
 }
 
 export default function RootLayout() {
-  useShiftNotificationNavigation();
+  useNotificationNavigation();
   return (
     <SafeAreaProvider>
       <AppProvider>

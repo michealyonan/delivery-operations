@@ -31,6 +31,7 @@ import type {
   Courier,
   CourierBreakPeriod,
   CourierFeeRemittance,
+  CourierNotification,
   CourierLocation,
   CourierPrivateDetails,
   CourierProfileUpdateInput,
@@ -72,6 +73,7 @@ interface AppContextValue {
   orderReturns: OrderReturn[];
   orderTransferRequests: OrderTransferRequest[];
   courierFeeRemittances: CourierFeeRemittance[];
+  courierNotifications: CourierNotification[];
   couriers: Courier[];
   shiftSlots: CourierShiftSlot[];
   shiftBookings: CourierShiftBooking[];
@@ -116,6 +118,19 @@ interface AppContextValue {
   unblockCourierShiftDay: (courierId: number, shiftDate: string) => Promise<void>;
   registerCourierPushToken: (token: string, platform: 'ios' | 'android') => Promise<void>;
   notifyUnbookedCouriers: () => Promise<{ sent: number; skipped: number; failed: number }>;
+  markCourierNotificationRead: (notificationId: string) => Promise<void>;
+  sendCourierNotification: (input: {
+    title: string;
+    body: string;
+    image?: ImagePickerAsset;
+    courierIds?: number[];
+  }) => Promise<{
+    recipientCount: number;
+    pushSent: number;
+    pushFailed: number;
+    pushSkipped: number;
+    pushError?: string;
+  }>;
   createOrder: (input: NewOrderInput) => Promise<void>;
   acceptAdminOrder: (orderId: string) => Promise<number | null>;
   saveRestaurantMenuItem: (
@@ -518,6 +533,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [orderReturns, setOrderReturns] = useState<OrderReturn[]>([]);
   const [orderTransferRequests, setOrderTransferRequests] = useState<OrderTransferRequest[]>([]);
   const [courierFeeRemittances, setCourierFeeRemittances] = useState<CourierFeeRemittance[]>([]);
+  const [courierNotifications, setCourierNotifications] = useState<CourierNotification[]>([]);
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [shiftSlots, setShiftSlots] = useState<CourierShiftSlot[]>([]);
   const [shiftBookings, setShiftBookings] = useState<CourierShiftBooking[]>([]);
@@ -629,6 +645,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       setOrders(cloneDemoOrders());
       setOrderTransferRequests([]);
       setCourierFeeRemittances([]);
+      setCourierNotifications([]);
       setCouriers(
         demoCouriers.map((courier) => ({
           ...courier,
@@ -859,6 +876,48 @@ export function AppProvider({ children }: PropsWithChildren) {
       );
     } else {
       setCourierFeeRemittances([]);
+    }
+
+    if (profile.role === 'courier' && profile.courierId != null) {
+      const { data: notificationRows, error: notificationsError } = await client
+        .from('courier_notifications')
+        .select('id, title, body, image_path, created_at, expires_at')
+        .order('created_at', { ascending: false });
+      if (notificationsError) throw notificationsError;
+      const { data: recipientRows, error: recipientsError } = await client
+        .from('courier_notification_recipients')
+        .select('notification_id, read_at')
+        .eq('courier_id', profile.courierId);
+      if (recipientsError) throw recipientsError;
+      const readAtByNotification = new Map<string, string | undefined>();
+      for (const recipient of recipientRows ?? []) {
+        readAtByNotification.set(recipient.notification_id, recipient.read_at ?? undefined);
+      }
+      const mappedNotifications = await Promise.all(
+        (notificationRows ?? []).map(async (notification) => {
+          let imageUrl: string | undefined;
+          if (notification.image_path) {
+            const { data: image, error: imageError } = await client.storage
+              .from('courier-notification-images')
+              .createSignedUrl(notification.image_path, 60 * 60);
+            if (imageError) throw imageError;
+            imageUrl = image.signedUrl;
+          }
+          return {
+            id: notification.id,
+            title: notification.title,
+            body: notification.body,
+            imageUrl,
+            createdAt: notification.created_at,
+            expiresAt: notification.expires_at,
+            recipientCount: 1,
+            readAt: readAtByNotification.get(notification.id),
+          };
+        }),
+      );
+      setCourierNotifications(mappedNotifications);
+    } else {
+      setCourierNotifications([]);
     }
 
     const { data: settings, error: settingsError } = await supabase
@@ -1362,6 +1421,16 @@ export function AppProvider({ children }: PropsWithChildren) {
           console.error('تعذر تحديث طلبات تحويل الطلبات فورًا:', error);
         });
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_notifications' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث إشعارات المندوبين فورًا:', error);
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_notification_recipients' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث مستلمي الإشعارات فورًا:', error);
+        });
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_shift_slots' }, () => {
         refresh().catch((error: unknown) => {
           console.error('تعذر تحديث مواعيد الشفتات فورًا:', error);
@@ -1533,6 +1602,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     setOrderReturns([]);
     setOrderTransferRequests([]);
     setCourierFeeRemittances([]);
+    setCourierNotifications([]);
     const today = new Date();
     const startDate = today.toISOString().slice(0, 10);
     const end = new Date(today);
@@ -3719,6 +3789,163 @@ export function AppProvider({ children }: PropsWithChildren) {
     [couriers, isDemo, orders, profile],
   );
 
+  const markCourierNotificationRead = useCallback(
+    async (notificationId: string) => {
+      if (!profile || profile.role !== 'courier' || profile.courierId == null) {
+        throw new Error('قراءة الإشعار متاحة لحساب المندوب فقط.');
+      }
+      const readAt = new Date().toISOString();
+      if (isDemo) {
+        setCourierNotifications((current) =>
+          current.map((notification) =>
+            notification.id === notificationId ? { ...notification, readAt } : notification,
+          ),
+        );
+        return;
+      }
+      const { data, error } = await assertBackend()
+        .from('courier_notification_recipients')
+        .update({ read_at: readAt })
+        .eq('notification_id', notificationId)
+        .eq('courier_id', profile.courierId)
+        .select('notification_id')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('الإشعار غير موجود ضمن إشعارات هذا المندوب.');
+      setCourierNotifications((current) =>
+        current.map((notification) =>
+          notification.id === notificationId ? { ...notification, readAt } : notification,
+        ),
+      );
+    },
+    [isDemo, profile],
+  );
+
+  const sendCourierNotification = useCallback(
+    async (input: {
+      title: string;
+      body: string;
+      image?: ImagePickerAsset;
+      courierIds?: number[];
+    }) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إرسال إشعارات المندوبين متاح للإدارة فقط.');
+      }
+      if (isDemo) throw new Error('إرسال الإشعارات يحتاج إلى حساب متصل.');
+      const title = input.title.trim();
+      const body = input.body.trim();
+      if (title.length < 1 || title.length > 120) {
+        throw new Error('يجب أن يكون عنوان الإشعار بين حرف و120 حرفًا.');
+      }
+      if (body.length > 2000 || (!body && !input.image)) {
+        throw new Error('أضف رسالة أو صورة، واجعل الرسالة أقل من 2000 حرف.');
+      }
+      if (input.image?.fileSize && input.image.fileSize > 8 * 1024 * 1024) {
+        throw new Error('حجم الصورة يتجاوز الحد المسموح (8 ميجابايت).');
+      }
+      const mimeType = input.image?.mimeType;
+      if (input.image && (!mimeType || !['image/jpeg', 'image/png', 'image/webp'].includes(mimeType))) {
+        throw new Error('اختر صورة بصيغة JPG أو PNG أو WebP.');
+      }
+      if (input.image && !input.image.base64) {
+        throw new Error('تعذر قراءة الصورة المختارة. أعد اختيارها.');
+      }
+      const imageBase64 = input.image?.base64;
+      const courierIds = input.courierIds
+        ? [...new Set(input.courierIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
+        : undefined;
+      if (input.courierIds && courierIds?.length === 0) {
+        throw new Error('اختر مندوبًا واحدًا على الأقل.');
+      }
+
+      const client = assertBackend();
+      let imagePath: string | null = null;
+      let notificationCreated = false;
+      try {
+        if (input.image && mimeType && imageBase64) {
+          const extension = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+          imagePath = `notifications/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${extension}`;
+          const { error: uploadError } = await client.storage
+            .from('courier-notification-images')
+            .upload(imagePath, decode(imageBase64), {
+              contentType: mimeType,
+              upsert: false,
+            });
+          if (uploadError) throw uploadError;
+        }
+
+        const { data, error } = await client.rpc('admin_send_courier_notification', {
+          p_title: title,
+          p_body: body,
+          p_image_path: imagePath,
+          p_courier_ids: courierIds ?? null,
+        });
+        if (error) throw error;
+        if (!data || typeof data !== 'object' || !('notification_id' in data)) {
+          throw new Error('لم يؤكد الخادم حفظ الإشعار.');
+        }
+        const result = data as { notification_id: unknown; recipient_count: unknown };
+        if (
+          typeof result.notification_id !== 'string' ||
+          typeof result.recipient_count !== 'number' ||
+          !Number.isSafeInteger(result.recipient_count) ||
+          Number(result.recipient_count) < 1
+        ) {
+          throw new Error('أعاد الخادم بيانات غير مكتملة عن الإشعار.');
+        }
+        notificationCreated = true;
+        const recipientCount = Number(result.recipient_count);
+        let pushSent = 0;
+        let pushFailed = 0;
+        let pushSkipped = 0;
+        let pushError: string | undefined;
+        const { data: pushResult, error: pushInvokeError } = await client.functions.invoke(
+          'send-courier-notification',
+          { body: { notificationId: result.notification_id } },
+        );
+        if (pushInvokeError || pushResult?.error) {
+          pushError =
+            pushResult?.error ??
+            pushInvokeError?.message ??
+            'تعذر إرسال تنبيه الهاتف.';
+        } else if (
+          Number.isSafeInteger(pushResult?.sent) &&
+          Number.isSafeInteger(pushResult?.failed) &&
+          Number.isSafeInteger(pushResult?.skipped)
+        ) {
+          pushSent = Number(pushResult.sent);
+          pushFailed = Number(pushResult.failed);
+          pushSkipped = Number(pushResult.skipped);
+        } else {
+          pushError = 'حُفظ الإشعار، لكن تعذر التحقق من نتيجة تنبيه الهاتف.';
+        }
+        try {
+          await refresh();
+        } catch (error) {
+          pushError =
+            pushError ??
+            `حُفظ الإشعار، لكن تعذر تحديث البيانات: ${
+              error instanceof Error ? error.message : 'خطأ غير معروف.'
+            }`;
+        }
+        return { recipientCount, pushSent, pushFailed, pushSkipped, pushError };
+      } catch (error) {
+        if (imagePath && !notificationCreated) {
+          const { error: cleanupError } = await client.storage
+            .from('courier-notification-images')
+            .remove([imagePath]);
+          if (cleanupError) {
+            throw new Error(
+              `${error instanceof Error ? error.message : 'تعذر إرسال الإشعار.'} وتعذر حذف الصورة المؤقتة.`,
+            );
+          }
+        }
+        throw error;
+      }
+    },
+    [isDemo, profile, refresh],
+  );
+
   const contextValue = useMemo<AppContextValue>(
     () => ({
       profile,
@@ -3731,6 +3958,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       orderReturns,
       orderTransferRequests,
       courierFeeRemittances,
+      courierNotifications,
       couriers,
       shiftSlots,
       shiftBookings,
@@ -3763,6 +3991,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       unblockCourierShiftDay,
       registerCourierPushToken,
       notifyUnbookedCouriers,
+      markCourierNotificationRead,
+      sendCourierNotification,
       createOrder,
       acceptAdminOrder,
       loadRestaurantMenu,
@@ -3808,6 +4038,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       orderReturns,
       orderTransferRequests,
       courierFeeRemittances,
+      courierNotifications,
       couriers,
       shiftSlots,
       shiftBookings,
@@ -3840,6 +4071,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       unblockCourierShiftDay,
       registerCourierPushToken,
       notifyUnbookedCouriers,
+      markCourierNotificationRead,
+      sendCourierNotification,
       createOrder,
       acceptAdminOrder,
       loadRestaurantMenu,
