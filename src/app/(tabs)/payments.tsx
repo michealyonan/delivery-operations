@@ -78,6 +78,7 @@ export default function PaymentsScreen() {
   const [startDate, setStartDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [endDate, setEndDate] = useState(today);
   const [selectedCourierId, setSelectedCourierId] = useState<number | null>(null);
+  const [courierSearch, setCourierSearch] = useState('');
   const [remittanceInput, setRemittanceInput] = useState('');
   const [remittanceBusy, setRemittanceBusy] = useState(false);
   const [remittanceError, setRemittanceError] = useState('');
@@ -90,6 +91,12 @@ export default function PaymentsScreen() {
   const rangeEnd = dayEndExclusive(endDate);
   const rangeValid = rangeStart < rangeEnd;
   const selectedCourier = couriers.find((courier) => courier.id === activeCourierId);
+  const filteredCouriers = useMemo(() => {
+    const query = courierSearch.trim().toLocaleLowerCase();
+    return query
+      ? couriers.filter((courier) => courier.code.toLocaleLowerCase().includes(query))
+      : couriers;
+  }, [courierSearch, couriers]);
   const deliveredOrders = useMemo(
     () =>
       orders
@@ -185,20 +192,34 @@ export default function PaymentsScreen() {
           {couriers.length === 0 ? (
             <Notice>لا توجد حسابات مندوبين.</Notice>
           ) : (
-            couriers.map((courier) => (
-              <ActionButton
-                key={courier.id}
-                onPress={() => {
-                  setSelectedCourierId(courier.id);
-                  setRemittanceInput('');
-                  setRemittanceError('');
-                  setRemittanceSuccess('');
-                }}
-                tone={activeCourierId === courier.id ? 'secondary' : 'outline'}
-              >
-                {courier.fullName}{'\n'}{courier.code}
-              </ActionButton>
-            ))
+            <>
+              <Field
+                autoCapitalize="characters"
+                autoCorrect={false}
+                label="ابحث برقم المندوب"
+                onChangeText={setCourierSearch}
+                placeholder="مثال: CR-000001"
+                value={courierSearch}
+              />
+              {filteredCouriers.length === 0 ? (
+                <Notice tone="warning">لا يوجد مندوب بهذا الرقم.</Notice>
+              ) : (
+                filteredCouriers.map((courier) => (
+                  <ActionButton
+                    key={courier.id}
+                    onPress={() => {
+                      setSelectedCourierId(courier.id);
+                      setRemittanceInput('');
+                      setRemittanceError('');
+                      setRemittanceSuccess('');
+                    }}
+                    tone={activeCourierId === courier.id ? 'secondary' : 'outline'}
+                  >
+                    {courier.fullName}{'\n'}{courier.code}
+                  </ActionButton>
+                ))
+              )}
+            </>
           )}
         </Section>
       ) : null}

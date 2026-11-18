@@ -15,6 +15,9 @@ export default function TabLayout() {
     orderAssignmentAttempts,
     orderReturns,
     orderTransferRequests,
+    shiftSlots,
+    shiftBookings,
+    shiftRecords,
     refresh,
     refreshError,
   } = useApp();
@@ -46,6 +49,17 @@ export default function TabLayout() {
   const pendingTransferCount = orderTransferRequests.filter(
     (request) => request.status === 'pending',
   ).length;
+  const lateShiftCount = shiftBookings.filter((booking) => {
+    if (booking.status !== 'booked' && booking.status !== 'swap_listed') return false;
+    const slot = shiftSlots.find((item) => item.id === booking.slotId);
+    return Boolean(
+      slot &&
+        new Date(slot.startsAt).getTime() <= (now ?? 0) &&
+        !shiftRecords.some(
+          (record) => record.bookingId === booking.id && record.startedAt,
+        ),
+    );
+  }).length;
 
   const retryRefresh = async () => {
     setRefreshBusy(true);
@@ -161,6 +175,37 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="admin-shifts"
+        options={{
+          title: 'الشفتات',
+          href: admin ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="calendar-clock-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="shift-delays"
+        options={{
+          title: 'التأخيرات',
+          href: admin ? undefined : null,
+          tabBarBadge: admin && lateShiftCount > 0 ? lateShiftCount : undefined,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="account-alert-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="my-shifts"
+        options={{
+          title: 'شيفتاتي',
+          href: profile.role === 'courier' ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="calendar-check-outline" color={String(color)} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="break-returns"
         options={{
           title: 'فك البريكات',
@@ -188,6 +233,10 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="restaurant-menu"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="order-details/[id]"
         options={{ href: null }}
       />
       <Tabs.Screen

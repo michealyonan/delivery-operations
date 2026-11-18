@@ -29,10 +29,15 @@ import type {
   AppProfile,
   BreakStartedBy,
   Courier,
+  CourierBreakPeriod,
   CourierFeeRemittance,
   CourierLocation,
   CourierPrivateDetails,
   CourierProfileUpdateInput,
+  CourierShiftBooking,
+  CourierShiftDayBlock,
+  CourierShiftRecord,
+  CourierShiftSlot,
   DeliveryOrder,
   ManagedAccountType,
   NewCourierInput,
@@ -68,6 +73,11 @@ interface AppContextValue {
   orderTransferRequests: OrderTransferRequest[];
   courierFeeRemittances: CourierFeeRemittance[];
   couriers: Courier[];
+  shiftSlots: CourierShiftSlot[];
+  shiftBookings: CourierShiftBooking[];
+  shiftRecords: CourierShiftRecord[];
+  breakPeriods: CourierBreakPeriod[];
+  shiftDayBlocks: CourierShiftDayBlock[];
   restaurants: Restaurant[];
   restaurantMenuItems: RestaurantMenuItem[];
   loadRestaurantMenu: (restaurantId?: number) => Promise<void>;
@@ -93,6 +103,19 @@ interface AppContextValue {
   signInDemo: (role: UserRole) => void;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
+  loadOrderDetails: (orderId: string) => Promise<DeliveryOrder | null>;
+  publishShiftSlots: (slots: {
+    shiftDate: string;
+    startsAt: string;
+    endsAt: string;
+  }[]) => Promise<number>;
+  bookShift: (slotId: number) => Promise<void>;
+  offerShiftSwap: (bookingId: number) => Promise<void>;
+  removeCourierShift: (bookingId: number) => Promise<void>;
+  blockCourierShiftDay: (courierId: number, shiftDate: string, reason: string) => Promise<void>;
+  unblockCourierShiftDay: (courierId: number, shiftDate: string) => Promise<void>;
+  registerCourierPushToken: (token: string, platform: 'ios' | 'android') => Promise<void>;
+  notifyUnbookedCouriers: () => Promise<{ sent: number; skipped: number; failed: number }>;
   createOrder: (input: NewOrderInput) => Promise<void>;
   acceptAdminOrder: (orderId: string) => Promise<number | null>;
   saveRestaurantMenuItem: (
@@ -413,6 +436,76 @@ function mapSupportMessage(row: Record<string, unknown>): SupportMessage {
   };
 }
 
+function mapCourierShiftSlot(row: Record<string, unknown>): CourierShiftSlot {
+  return {
+    id: asNumber(row.id),
+    shiftDate: String(row.shift_date),
+    startsAt: String(row.starts_at),
+    endsAt: String(row.ends_at),
+    isCancelled: Boolean(row.is_cancelled),
+  };
+}
+
+function mapCourierShiftBooking(row: Record<string, unknown>): CourierShiftBooking {
+  return {
+    id: asNumber(row.id),
+    slotId: asNumber(row.slot_id),
+    courierId: asNumber(row.courier_id),
+    status: row.status as CourierShiftBooking['status'],
+    bookedAt: String(row.booked_at),
+    swapListedAt: row.swap_listed_at == null ? undefined : String(row.swap_listed_at),
+  };
+}
+
+function mapCourierShiftRecord(row: Record<string, unknown>): CourierShiftRecord {
+  return {
+    id: asNumber(row.id),
+    courierId: asNumber(row.courier_id),
+    bookingId: row.booking_id == null ? undefined : asNumber(row.booking_id),
+    startedAt: row.started_at == null ? undefined : String(row.started_at),
+    endedAt: row.ended_at == null ? undefined : String(row.ended_at),
+  };
+}
+
+function mapCourierBreakPeriod(row: Record<string, unknown>): CourierBreakPeriod {
+  return {
+    id: asNumber(row.id),
+    courierId: asNumber(row.courier_id),
+    shiftId: row.shift_id == null ? undefined : asNumber(row.shift_id),
+    startedAt: String(row.started_at),
+    scheduledEndAt: String(row.scheduled_end_at),
+    endedAt: row.ended_at == null ? undefined : String(row.ended_at),
+    startedBy: row.started_by as CourierBreakPeriod['startedBy'],
+  };
+}
+
+function mapCourierShiftDayBlock(row: Record<string, unknown>): CourierShiftDayBlock {
+  return {
+    courierId: asNumber(row.courier_id),
+    shiftDate: String(row.shift_date),
+    reason: String(row.reason ?? ''),
+  };
+}
+
+function createDemoShiftSlots(): CourierShiftSlot[] {
+  const slots: CourierShiftSlot[] = [];
+  for (let offset = 1; offset <= 7; offset += 1) {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    const shiftDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const startsAt = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 9);
+    const endsAt = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 17);
+    slots.push({
+      id: offset,
+      shiftDate,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      isCancelled: false,
+    });
+  }
+  return slots;
+}
+
 export function AppProvider({ children }: PropsWithChildren) {
   const [profile, setProfile] = useState<AppProfile | null>(null);
   const courierPhotoUrlCache = useRef(new Map<string, { url: string; expiresAt: number }>());
@@ -426,6 +519,11 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [orderTransferRequests, setOrderTransferRequests] = useState<OrderTransferRequest[]>([]);
   const [courierFeeRemittances, setCourierFeeRemittances] = useState<CourierFeeRemittance[]>([]);
   const [couriers, setCouriers] = useState<Courier[]>([]);
+  const [shiftSlots, setShiftSlots] = useState<CourierShiftSlot[]>([]);
+  const [shiftBookings, setShiftBookings] = useState<CourierShiftBooking[]>([]);
+  const [shiftRecords, setShiftRecords] = useState<CourierShiftRecord[]>([]);
+  const [breakPeriods, setBreakPeriods] = useState<CourierBreakPeriod[]>([]);
+  const [shiftDayBlocks, setShiftDayBlocks] = useState<CourierShiftDayBlock[]>([]);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [restaurantMenuItems, setRestaurantMenuItems] = useState<RestaurantMenuItem[]>([]);
   const [locations, setLocations] = useState<CourierLocation[]>([]);
@@ -551,6 +649,45 @@ export function AppProvider({ children }: PropsWithChildren) {
     }
     if (!profile || !supabase) return;
     const client = assertBackend();
+
+    const [
+      { data: slotRows, error: slotError },
+      { data: bookingRows, error: bookingError },
+      { data: shiftRecordRows, error: shiftRecordError },
+      { data: breakPeriodRows, error: breakPeriodError },
+      { data: dayBlockRows, error: dayBlockError },
+    ] = await Promise.all([
+      client
+        .from('courier_shift_slots')
+        .select('id, shift_date, starts_at, ends_at, is_cancelled')
+        .order('starts_at'),
+      client
+        .from('courier_shift_bookings')
+        .select('id, slot_id, courier_id, status, booked_at, swap_listed_at')
+        .order('booked_at', { ascending: false }),
+      client
+        .from('courier_shifts')
+        .select('id, courier_id, booking_id, started_at, ended_at')
+        .order('started_at', { ascending: false }),
+      client
+        .from('courier_break_periods')
+        .select('id, courier_id, shift_id, started_at, scheduled_end_at, ended_at, started_by')
+        .order('started_at', { ascending: false }),
+      client
+        .from('courier_shift_day_blocks')
+        .select('courier_id, shift_date, reason')
+        .order('shift_date'),
+    ]);
+    if (slotError) throw slotError;
+    if (bookingError) throw bookingError;
+    if (shiftRecordError) throw shiftRecordError;
+    if (breakPeriodError) throw breakPeriodError;
+    if (dayBlockError) throw dayBlockError;
+    setShiftSlots((slotRows ?? []).map((row) => mapCourierShiftSlot(row)));
+    setShiftBookings((bookingRows ?? []).map((row) => mapCourierShiftBooking(row)));
+    setShiftRecords((shiftRecordRows ?? []).map((row) => mapCourierShiftRecord(row)));
+    setBreakPeriods((breakPeriodRows ?? []).map((row) => mapCourierBreakPeriod(row)));
+    setShiftDayBlocks((dayBlockRows ?? []).map((row) => mapCourierShiftDayBlock(row)));
 
     if (profile.role === 'courier' && profile.courierId) {
       const client = assertBackend();
@@ -867,6 +1004,303 @@ export function AppProvider({ children }: PropsWithChildren) {
     }
   }, [isDemo, profile, refreshData]);
 
+  const loadOrderDetails = useCallback(
+    async (orderId: string): Promise<DeliveryOrder | null> => {
+      if (!profile) throw new Error('سجّل الدخول أولًا.');
+      if (isDemo) return orders.find((order) => order.id === orderId) ?? null;
+
+      const client = assertBackend();
+      const { data: row, error } = await client
+        .from('orders')
+        .select('*')
+        .eq('id', orderId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!row) return null;
+
+      const { data: itemRows, error: itemsError } = await client
+        .from('order_items')
+        .select('id, menu_item_id, item_name, unit_price_piasters, quantity, line_total_piasters')
+        .eq('order_id', orderId)
+        .order('id');
+      if (itemsError) throw itemsError;
+
+      const lineItems = (itemRows ?? []).map((item) => ({
+        id: asNumber(item.id),
+        menuItemId: item.menu_item_id == null ? undefined : asNumber(item.menu_item_id),
+        name: item.item_name,
+        unitPricePiasters: asNumber(item.unit_price_piasters),
+        quantity: item.quantity,
+        lineTotalPiasters: asNumber(item.line_total_piasters),
+      }));
+      const order = { ...mapOrder(row as Record<string, unknown>), lineItems };
+
+      if (profile.role === 'admin' || profile.role === 'courier') {
+        const { data: cash, error: cashError } = await client
+          .from('order_cash')
+          .select(
+            'collected_piasters, paid_to_restaurant_piasters, paid_to_previous_courier_piasters, previous_courier_id',
+          )
+          .eq('order_id', orderId)
+          .maybeSingle();
+        if (cashError) throw cashError;
+        if (cash) {
+          order.collectedPiasters = asNumber(cash.collected_piasters);
+          order.paidToRestaurantPiasters = asNumber(cash.paid_to_restaurant_piasters);
+          order.paidToPreviousCourierPiasters = asNumber(
+            cash.paid_to_previous_courier_piasters,
+          );
+          order.previousCourierId =
+            cash.previous_courier_id == null
+              ? undefined
+              : asNumber(cash.previous_courier_id);
+        }
+      }
+
+      setOrders((current) => {
+        const found = current.some((item) => item.id === order.id);
+        return found
+          ? current.map((item) => (item.id === order.id ? order : item))
+          : [order, ...current];
+      });
+      return order;
+    },
+    [isDemo, orders, profile],
+  );
+
+  const publishShiftSlots = useCallback(
+    async (slots: { shiftDate: string; startsAt: string; endsAt: string }[]) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('نشر مواعيد الشفتات متاح للإدارة فقط.');
+      }
+      if (slots.length < 1 || slots.length > 100) {
+        throw new Error('انشر من 1 إلى 100 موعد شيفت في المرة الواحدة.');
+      }
+      if (isDemo) {
+        const nextId = Math.max(0, ...shiftSlots.map((slot) => slot.id)) + 1;
+        const added = slots.map((slot, index) => ({
+          id: nextId + index,
+          shiftDate: slot.shiftDate,
+          startsAt: slot.startsAt,
+          endsAt: slot.endsAt,
+          isCancelled: false,
+        }));
+        setShiftSlots((current) => [...current, ...added]);
+        return added.length;
+      }
+
+      const { data, error } = await assertBackend().rpc('admin_publish_courier_shift_slots', {
+        p_slots: slots.map((slot) => ({
+          shift_date: slot.shiftDate,
+          starts_at: slot.startsAt,
+          ends_at: slot.endsAt,
+        })),
+      });
+      if (error) throw error;
+      await refresh();
+      const count = Number(data);
+      if (!Number.isSafeInteger(count) || count < 0) {
+        throw new Error('لم يرجع الخادم عدد مواعيد الشفتات التي تم نشرها.');
+      }
+      return count;
+    },
+    [isDemo, profile, refresh, shiftSlots],
+  );
+
+  const bookShift = useCallback(
+    async (slotId: number) => {
+      if (!profile || profile.role !== 'courier' || profile.courierId == null) {
+        throw new Error('حجز الشفتات متاح للمندوب فقط.');
+      }
+      if (isDemo) {
+        const slot = shiftSlots.find((item) => item.id === slotId && !item.isCancelled);
+        if (!slot) throw new Error('موعد الشيفت غير موجود.');
+        const start = new Date(slot.startsAt).getTime();
+        if (start <= Date.now() || start > Date.now() + 7 * 24 * 60 * 60_000) {
+          throw new Error('يمكنك حجز الشفتات المتاحة خلال الأيام السبعة القادمة فقط.');
+        }
+        if (shiftDayBlocks.some((block) => block.courierId === profile.courierId && block.shiftDate === slot.shiftDate)) {
+          throw new Error('لا يمكنك العمل في هذا اليوم؛ راجع الإدارة.');
+        }
+        if (shiftBookings.some((booking) => {
+          if (booking.courierId !== profile.courierId || !['booked', 'swap_listed', 'completed'].includes(booking.status)) return false;
+          const bookedSlot = shiftSlots.find((item) => item.id === booking.slotId);
+          return bookedSlot?.shiftDate === slot.shiftDate;
+        })) {
+          throw new Error('لديك حجز شيفت بالفعل في هذا اليوم.');
+        }
+        setShiftBookings((current) => [
+          {
+            id: Math.max(0, ...current.map((booking) => booking.id)) + 1,
+            slotId,
+            courierId: profile.courierId!,
+            status: 'booked',
+            bookedAt: new Date().toISOString(),
+          },
+          ...current,
+        ]);
+        return;
+      }
+      const { error } = await assertBackend().rpc('courier_book_shift', { p_slot_id: slotId });
+      if (error) throw error;
+      await refresh();
+    },
+    [isDemo, profile, refresh, shiftBookings, shiftDayBlocks, shiftSlots],
+  );
+
+  const offerShiftSwap = useCallback(
+    async (bookingId: number) => {
+      if (!profile || profile.role !== 'courier' || profile.courierId == null) {
+        throw new Error('عرض الشيفت للتبديل متاح للمندوب فقط.');
+      }
+      if (isDemo) {
+        const booking = shiftBookings.find(
+          (item) =>
+            item.id === bookingId &&
+            item.courierId === profile.courierId &&
+            item.status === 'booked',
+        );
+        if (!booking) throw new Error('لا يمكن عرض هذا الشيفت للتبديل.');
+        setShiftBookings((current) =>
+          current.map((item) =>
+            item.id === bookingId
+              ? { ...item, status: 'swap_listed', swapListedAt: new Date().toISOString() }
+              : item,
+          ),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('courier_offer_shift_swap', {
+        p_booking_id: bookingId,
+      });
+      if (error) throw error;
+      await refresh();
+    },
+    [isDemo, profile, refresh, shiftBookings],
+  );
+
+  const removeCourierShift = useCallback(
+    async (bookingId: number) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('رفع حجز الشيفت متاح للإدارة فقط.');
+      }
+      if (isDemo) {
+        const booking = shiftBookings.find(
+          (item) =>
+            item.id === bookingId &&
+            ['booked', 'swap_listed'].includes(item.status),
+        );
+        const slot = booking && shiftSlots.find((item) => item.id === booking.slotId);
+        if (!booking || !slot || new Date(slot.startsAt).getTime() <= Date.now()) {
+          throw new Error('لا يمكن رفع شيفت بدأ بالفعل أو لم يعد متاحًا.');
+        }
+        setShiftBookings((current) =>
+          current.map((item) =>
+            item.id === bookingId ? { ...item, status: 'admin_removed' } : item,
+          ),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('admin_remove_courier_shift', {
+        p_booking_id: bookingId,
+      });
+      if (error) throw error;
+      await refresh();
+    },
+    [isDemo, profile, refresh, shiftBookings, shiftSlots],
+  );
+
+  const blockCourierShiftDay = useCallback(
+    async (courierId: number, shiftDate: string, reason: string) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إيقاف عمل المندوب في يوم محدد متاح للإدارة فقط.');
+      }
+      if (isDemo) {
+        setShiftDayBlocks((current) => [
+          ...current.filter(
+            (block) => block.courierId !== courierId || block.shiftDate !== shiftDate,
+          ),
+          { courierId, shiftDate, reason: reason.trim() },
+        ]);
+        setShiftBookings((current) =>
+          current.map((booking) => {
+            const slot = shiftSlots.find((item) => item.id === booking.slotId);
+            return booking.courierId === courierId &&
+              slot?.shiftDate === shiftDate &&
+              ['booked', 'swap_listed'].includes(booking.status)
+              ? { ...booking, status: 'admin_removed' }
+              : booking;
+          }),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('admin_block_courier_shift_date', {
+        p_courier_id: courierId,
+        p_shift_date: shiftDate,
+        p_reason: reason.trim(),
+      });
+      if (error) throw error;
+      await refresh();
+    },
+    [isDemo, profile, refresh, shiftSlots],
+  );
+
+  const unblockCourierShiftDay = useCallback(
+    async (courierId: number, shiftDate: string) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('إعادة تفعيل يوم العمل متاحة للإدارة فقط.');
+      }
+      if (isDemo) {
+        setShiftDayBlocks((current) =>
+          current.filter(
+            (block) => block.courierId !== courierId || block.shiftDate !== shiftDate,
+          ),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('admin_unblock_courier_shift_date', {
+        p_courier_id: courierId,
+        p_shift_date: shiftDate,
+      });
+      if (error) throw error;
+      await refresh();
+    },
+    [isDemo, profile, refresh],
+  );
+
+  const registerCourierPushToken = useCallback(
+    async (token: string, platform: 'ios' | 'android') => {
+      if (!profile || profile.role !== 'courier' || profile.courierId == null || isDemo) return;
+      const { error } = await assertBackend().from('courier_push_tokens').upsert(
+        { expo_push_token: token, courier_id: profile.courierId, platform },
+        { onConflict: 'expo_push_token' },
+      );
+      if (error) throw error;
+    },
+    [isDemo, profile],
+  );
+
+  const notifyUnbookedCouriers = useCallback(async () => {
+    if (!profile || profile.role !== 'admin') {
+      throw new Error('إرسال تذكير بحجز الشفت متاح للإدارة فقط.');
+    }
+    if (isDemo) return { sent: 0, skipped: 0, failed: 0 };
+    const { data, error } = await assertBackend().functions.invoke(
+      'notify-unbooked-couriers',
+      { body: {} },
+    );
+    if (error) throw new Error(await getAccountFunctionErrorMessage(error));
+    if (
+      !data ||
+      typeof data.sent !== 'number' ||
+      typeof data.skipped !== 'number' ||
+      typeof data.failed !== 'number'
+    ) {
+      throw new Error('لم يرجع الخادم نتيجة إرسال التنبيهات.');
+    }
+    return { sent: data.sent, skipped: data.skipped, failed: data.failed };
+  }, [isDemo, profile]);
+
   useEffect(() => {
     let active = true;
     const initialize = async () => {
@@ -927,6 +1361,31 @@ export function AppProvider({ children }: PropsWithChildren) {
         refresh().catch((error: unknown) => {
           console.error('تعذر تحديث طلبات تحويل الطلبات فورًا:', error);
         });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_shift_slots' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث مواعيد الشفتات فورًا:', error);
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_shift_bookings' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث حجوزات الشفتات فورًا:', error);
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_shift_day_blocks' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث أيام إيقاف الشفتات فورًا:', error);
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_shifts' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث سجل ساعات الشفت فورًا:', error);
+        });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courier_break_periods' }, () => {
+        refresh().catch((error: unknown) => {
+          console.error('تعذر تحديث سجل البريكات فورًا:', error);
+        });
       });
     if (profile.role === 'admin' || profile.role === 'courier') {
       channel.on(
@@ -983,6 +1442,49 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, [isDemo, profile, refresh]);
 
   useEffect(() => {
+    if (
+      isDemo ||
+      profile?.role !== 'courier' ||
+      profile.courierId == null ||
+      Platform.OS === 'web'
+    ) return;
+    let active = true;
+    const registerForShiftReminders = async () => {
+      const Notifications = await import('expo-notifications');
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('shift-reminders', {
+          name: 'تذكيرات الشيفت',
+          importance: Notifications.AndroidImportance.DEFAULT,
+        });
+      }
+      const existing = await Notifications.getPermissionsAsync();
+      const permissions =
+        existing.status === 'granted'
+          ? existing
+          : await Notifications.requestPermissionsAsync();
+      if (permissions.status !== 'granted') return;
+      const Constants = await import('expo-constants');
+      const projectId =
+        Constants.default.expoConfig?.extra?.eas?.projectId ??
+        Constants.default.easConfig?.projectId;
+      if (!projectId) throw new Error('إعداد مشروع الإشعارات غير موجود.');
+      const token = await Notifications.getExpoPushTokenAsync({ projectId });
+      if (active) {
+        const platform = Platform.OS;
+        if (platform === 'ios' || platform === 'android') {
+          await registerCourierPushToken(token.data, platform);
+        }
+      }
+    };
+    registerForShiftReminders().catch((error: unknown) => {
+      console.error('تعذر تسجيل إشعارات تذكير الشيفت:', error);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isDemo, profile?.courierId, profile?.role, registerCourierPushToken]);
+
+  useEffect(() => {
     if (isDemo || profile?.role !== 'courier' || profile.isOnShift) return;
     import('../lib/location')
       .then(({ stopShiftLocationUpdates }) => stopShiftLocationUpdates())
@@ -1021,6 +1523,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   );
 
   const signInDemo = useCallback((role: UserRole) => {
+    const demoShiftSlots = createDemoShiftSlots();
     setIsDemo(true);
     setHasLoadedData(false);
     setRefreshError(null);
@@ -1043,6 +1546,19 @@ export function AppProvider({ children }: PropsWithChildren) {
         isTerminated: false,
       })),
     );
+    setShiftSlots(demoShiftSlots);
+    setShiftBookings([
+      {
+        id: 1,
+        slotId: demoShiftSlots[0].id,
+        courierId: demoCouriers[0].id,
+        status: 'booked',
+        bookedAt: new Date().toISOString(),
+      },
+    ]);
+    setShiftRecords([]);
+    setBreakPeriods([]);
+    setShiftDayBlocks([]);
     setRestaurants(demoRestaurants.map((restaurant) => ({ ...restaurant })));
     setRestaurantMenuItems(demoRestaurantMenuItems.map((item) => ({ ...item })));
     setLocations([]);
@@ -1072,6 +1588,11 @@ export function AppProvider({ children }: PropsWithChildren) {
     setOrderTransferRequests([]);
     setCourierFeeRemittances([]);
     setCouriers([]);
+    setShiftSlots([]);
+    setShiftBookings([]);
+    setShiftRecords([]);
+    setBreakPeriods([]);
+    setShiftDayBlocks([]);
     setRestaurants([]);
     setRestaurantMenuItems([]);
     setLocations([]);
@@ -2693,6 +3214,27 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       if (isDemo) {
         const now = new Date().toISOString();
+        const nowMs = Date.now();
+        const nextBooking = active
+          ? shiftBookings.find((booking) => {
+              const slot = shiftSlots.find((item) => item.id === booking.slotId);
+              return (
+                booking.courierId === profile.courierId &&
+                ['booked', 'swap_listed'].includes(booking.status) &&
+                slot != null &&
+                nowMs >= new Date(slot.startsAt).getTime() - 30 * 60_000 &&
+                nowMs < new Date(slot.endsAt).getTime() &&
+                !shiftDayBlocks.some(
+                  (block) =>
+                    block.courierId === booking.courierId &&
+                    block.shiftDate === slot.shiftDate,
+                )
+              );
+            })
+          : undefined;
+        if (active && !nextBooking) {
+          throw new Error('لا يمكنك بدء الشيفت إلا قبل موعده بـ30 دقيقة، ويجب أن يكون لديك حجز.');
+        }
         const nextProfile = active
           ? {
               ...profile,
@@ -2703,6 +3245,24 @@ export function AppProvider({ children }: PropsWithChildren) {
             }
           : { ...profile, isOnShift: true, shiftCloseRequestedAt: now };
         setProfile(nextProfile);
+        if (active && nextBooking) {
+          setShiftBookings((current) =>
+            current.map((booking) =>
+              booking.id === nextBooking.id
+                ? { ...booking, status: 'booked', swapListedAt: undefined }
+                : booking,
+            ),
+          );
+          setShiftRecords((current) => [
+            {
+              id: Date.now(),
+              courierId: profile.courierId!,
+              bookingId: nextBooking.id,
+              startedAt: now,
+            },
+            ...current,
+          ]);
+        }
         setCouriers((current) =>
           current.map((courier) =>
             courier.id === profile.courierId
@@ -2759,7 +3319,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       });
       await refresh();
     },
-    [isDemo, profile, refresh],
+    [isDemo, profile, refresh, shiftBookings, shiftDayBlocks, shiftSlots],
   );
 
   const approveCourierShiftClose = useCallback(
@@ -2769,6 +3329,25 @@ export function AppProvider({ children }: PropsWithChildren) {
       }
       if (isDemo) {
         const endedAt = new Date().toISOString();
+        const openShift = shiftRecords.find(
+          (shift) => shift.courierId === courierId && !shift.endedAt,
+        );
+        if (openShift) {
+          setShiftRecords((current) =>
+            current.map((shift) =>
+              shift.id === openShift.id ? { ...shift, endedAt } : shift,
+            ),
+          );
+          if (openShift.bookingId != null) {
+            setShiftBookings((current) =>
+              current.map((booking) =>
+                booking.id === openShift.bookingId
+                  ? { ...booking, status: 'completed' }
+                  : booking,
+              ),
+            );
+          }
+        }
         setCouriers((current) =>
           current.map((courier) =>
             courier.id === courierId
@@ -2809,7 +3388,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         ),
       );
     },
-    [isDemo, profile],
+    [isDemo, profile, shiftRecords],
   );
   const getCourierContact = useCallback(
     async (orderId: string) => {
@@ -3153,6 +3732,11 @@ export function AppProvider({ children }: PropsWithChildren) {
       orderTransferRequests,
       courierFeeRemittances,
       couriers,
+      shiftSlots,
+      shiftBookings,
+      shiftRecords,
+      breakPeriods,
+      shiftDayBlocks,
       restaurants,
       restaurantMenuItems,
       locations,
@@ -3170,6 +3754,15 @@ export function AppProvider({ children }: PropsWithChildren) {
       signInDemo,
       signOut,
       refresh,
+      loadOrderDetails,
+      publishShiftSlots,
+      bookShift,
+      offerShiftSwap,
+      removeCourierShift,
+      blockCourierShiftDay,
+      unblockCourierShiftDay,
+      registerCourierPushToken,
+      notifyUnbookedCouriers,
       createOrder,
       acceptAdminOrder,
       loadRestaurantMenu,
@@ -3216,6 +3809,11 @@ export function AppProvider({ children }: PropsWithChildren) {
       orderTransferRequests,
       courierFeeRemittances,
       couriers,
+      shiftSlots,
+      shiftBookings,
+      shiftRecords,
+      breakPeriods,
+      shiftDayBlocks,
       restaurants,
       restaurantMenuItems,
       locations,
@@ -3233,6 +3831,15 @@ export function AppProvider({ children }: PropsWithChildren) {
       signInDemo,
       signOut,
       refresh,
+      loadOrderDetails,
+      publishShiftSlots,
+      bookShift,
+      offerShiftSwap,
+      removeCourierShift,
+      blockCourierShiftDay,
+      unblockCourierShiftDay,
+      registerCourierPushToken,
+      notifyUnbookedCouriers,
       createOrder,
       acceptAdminOrder,
       loadRestaurantMenu,

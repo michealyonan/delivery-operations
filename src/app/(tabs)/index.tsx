@@ -487,7 +487,16 @@ function RestaurantHome() {
 }
 
 function CourierHome() {
-  const { profile, orders, isDemo, setShift, endCourierBreak } = useApp();
+  const {
+    profile,
+    orders,
+    isDemo,
+    shiftSlots,
+    shiftBookings,
+    shiftRecords,
+    setShift,
+    endCourierBreak,
+  } = useApp();
   const [busy, setBusy] = useState(false);
   const [shiftError, setShiftError] = useState('');
   const [breakBusy, setBreakBusy] = useState(false);
@@ -511,6 +520,26 @@ function CourierHome() {
     ['assigned', 'accepted', 'picked_up'].includes(order.status),
   );
   const deliveredOrders = allMyOrders.filter((order) => order.status === 'delivered');
+  const nextShiftBooking = shiftBookings
+    .filter(
+      (booking) =>
+        booking.courierId === profile?.courierId &&
+        (booking.status === 'booked' || booking.status === 'swap_listed'),
+    )
+    .map((booking) => ({
+      booking,
+      slot: shiftSlots.find((slot) => slot.id === booking.slotId),
+    }))
+    .filter(
+      (item): item is typeof item & { slot: NonNullable<typeof item.slot> } =>
+        item.slot != null && !shiftRecords.some(
+          (record) => record.bookingId === item.booking.id && record.startedAt,
+        ),
+    )
+    .sort((a, b) => a.slot.startsAt.localeCompare(b.slot.startsAt))[0];
+  const shiftIsLate = Boolean(
+    nextShiftBooking && new Date(nextShiftBooking.slot.startsAt).getTime() <= (now ?? 0),
+  );
   const todayOrders = deliveredOrders.filter((order) => order.deliveredAt && isToday(order.deliveredAt));
   const todayCollected = todayOrders.reduce(
     (total, order) => total + (order.deliveryFeePiasters ?? 0),
@@ -545,6 +574,36 @@ function CourierHome() {
     <Page>
       <Heading>أهلًا {profile?.name}</Heading>
       <Body>رقم المندوب الثابت: {profile?.courierCode ?? 'معاينة'}</Body>
+      {nextShiftBooking ? (
+        <Section title="الشيفت القادم">
+          <Body>
+            {new Date(`${nextShiftBooking.slot.shiftDate}T00:00:00`).toLocaleDateString('ar-EG')}
+            {' · '}
+            {new Date(nextShiftBooking.slot.startsAt).toLocaleTimeString('ar-EG', {
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
+            {' – '}
+            {new Date(nextShiftBooking.slot.endsAt).toLocaleTimeString('ar-EG', {
+              hour: 'numeric',
+              minute: '2-digit',
+            })}
+          </Body>
+          {shiftIsLate ? (
+            <Notice tone="danger">أنت متأخر عن موعد الشيفت؛ ابدأه الآن.</Notice>
+          ) : null}
+          <ActionButton onPress={() => router.push('/(tabs)/my-shifts')} tone="outline">
+            عرض حجوزات الشفتات
+          </ActionButton>
+        </Section>
+      ) : (
+        <Section title="الشيفتات">
+          <Notice tone="warning">ليس لديك شيفت محجوز. احجز من المواعيد المتاحة للأيام السبعة القادمة.</Notice>
+          <ActionButton onPress={() => router.push('/(tabs)/my-shifts')} tone="secondary">
+            حجز شيفت
+          </ActionButton>
+        </Section>
+      )}
       {isDemo && <Notice tone="warning">الموقع والطلبات في هذه الشاشة بيانات تجريبية.</Notice>}
       <View style={[styles.shiftBanner, active ? styles.shiftOn : styles.shiftOff]}>
         <Subheading>

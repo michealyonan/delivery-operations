@@ -6,3 +6,6 @@ verify_jwt = true
 
 [functions.admin-manage-account]
 verify_jwt = false
+
+[functions.notify-unbooked-couriers]
+verify_jwt = true

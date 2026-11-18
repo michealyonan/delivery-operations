@@ -12,6 +12,12 @@ export type OrderStatus =
   | 'picked_up'
   | 'delivered'
   | 'cancelled';
+export type CourierShiftBookingStatus =
+  | 'booked'
+  | 'swap_listed'
+  | 'completed'
+  | 'admin_removed'
+  | 'cancelled';
 export type OrderTransferReason =
   | 'vehicle_issue'
   | 'health_issue'
@@ -83,6 +89,47 @@ export interface Courier {
   contractEndDate: string;
   isTerminated: boolean;
   location?: CourierLocation;
+}
+
+export interface CourierShiftSlot {
+  id: number;
+  shiftDate: string;
+  startsAt: string;
+  endsAt: string;
+  isCancelled: boolean;
+}
+
+export interface CourierShiftBooking {
+  id: number;
+  slotId: number;
+  courierId: number;
+  status: CourierShiftBookingStatus;
+  bookedAt: string;
+  swapListedAt?: string;
+}
+
+export interface CourierShiftRecord {
+  id: number;
+  courierId: number;
+  bookingId?: number;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export interface CourierBreakPeriod {
+  id: number;
+  courierId: number;
+  shiftId?: number;
+  startedAt: string;
+  scheduledEndAt: string;
+  endedAt?: string;
+  startedBy: BreakStartedBy;
+}
+
+export interface CourierShiftDayBlock {
+  courierId: number;
+  shiftDate: string;
+  reason: string;
 }
 
 export interface Restaurant {

@@ -4,14 +4,14 @@ import * as ImagePicker from 'expo-image-picker';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
-import { Alert } from '../../lib/platform-alert';
-import { orderTransferReasonOptions } from '../../lib/order-transfer';
-import { useApp, parsePiasters } from '../../state/app-context';
-import { colors, spacing } from '../../theme';
-import type { OrderTransferReason } from '../../types';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../../components/ui';
+import { Alert } from '../../../lib/platform-alert';
+import { orderTransferReasonOptions } from '../../../lib/order-transfer';
+import { useApp, parsePiasters } from '../../../state/app-context';
+import { colors, spacing } from '../../../theme';
+import type { OrderTransferReason } from '../../../types';
 
-const CourierMap = lazy(() => import('../../components/courier-map'));
+const CourierMap = lazy(() => import('../../../components/courier-map'));
 const googleMapsKeyConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY);
 
 function money(piasters: number | undefined) {
@@ -35,7 +35,6 @@ export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const {
     profile,
-    hasLoadedData,
     orders,
     orderAssignmentAttempts,
     orderReturns,
@@ -52,7 +51,7 @@ export default function OrderDetailScreen() {
     completeOrderReturn,
     confirmOrderReturn,
     requestOrderTransfer,
-    refresh,
+    loadOrderDetails,
   } = useApp();
   const order = useMemo(() => orders.find((item) => item.id === id), [id, orders]);
   const attemptedOrderLookups = useRef(new Set<string>());
@@ -67,7 +66,7 @@ export default function OrderDetailScreen() {
       attemptedOrderLookups.current.add(id);
       setOrderLookup({ orderId: id, status: 'loading' });
       try {
-        await refresh();
+        await loadOrderDetails(id);
         setOrderLookup({ orderId: id, status: 'loaded' });
       } catch (error) {
         setOrderLookup({
@@ -77,15 +76,15 @@ export default function OrderDetailScreen() {
         });
       }
     },
-    [id, profile, refresh],
+    [id, loadOrderDetails, profile],
   );
   useEffect(() => {
-    if (order || !hasLoadedData) return;
+    if (order || !profile) return;
     const timer = setTimeout(() => {
       void refreshMissingOrder();
     }, 0);
     return () => clearTimeout(timer);
-  }, [hasLoadedData, order, refreshMissingOrder]);
+  }, [order, profile, refreshMissingOrder]);
   const orderReturn = orderReturns.find((item) => item.orderId === id);
   const canCourierViewOrderTimes =
     order?.status === 'delivered' ||
@@ -168,7 +167,7 @@ export default function OrderDetailScreen() {
       : null;
   if (!order) {
     const lookupIsPending =
-      !hasLoadedData ||
+      !profile ||
       orderLookup?.orderId !== id ||
       orderLookup.status === 'loading';
     return (
