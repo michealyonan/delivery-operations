@@ -18,6 +18,22 @@ function isToday(value: string) {
   return new Date(value).toDateString() === new Date().toDateString();
 }
 
+function courierShiftErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' &&
+          error !== null &&
+          'message' in error &&
+          typeof error.message === 'string'
+        ? error.message
+        : '';
+  if (message.includes('You can start a shift only 30 minutes before its booked start time')) {
+    return 'لا يمكن بدء الشيفت الآن. يلزم وجود حجز ساري، ويمكنك البدء قبل موعده بـ30 دقيقة فقط.';
+  }
+  return message || 'تعذر تغيير الشيفت. حاول مرة أخرى.';
+}
+
 function Metric({ value, label }: { value: string; label: string }) {
   return (
     <View style={styles.metric}>
@@ -530,8 +546,27 @@ function CourierHome() {
         ),
     )
     .sort((a, b) => a.slot.startsAt.localeCompare(b.slot.startsAt))[0];
+  const nextShiftStartsAt = nextShiftBooking
+    ? new Date(nextShiftBooking.slot.startsAt).getTime()
+    : null;
+  const nextShiftEndsAt = nextShiftBooking
+    ? new Date(nextShiftBooking.slot.endsAt).getTime()
+    : null;
+  const shiftStartWindowOpensAt =
+    nextShiftStartsAt == null ? null : nextShiftStartsAt - 30 * 60_000;
+  const canStartShift = Boolean(
+    now !== null &&
+      shiftStartWindowOpensAt !== null &&
+      nextShiftEndsAt !== null &&
+      now >= shiftStartWindowOpensAt &&
+      now < nextShiftEndsAt,
+  );
   const shiftIsLate = Boolean(
-    nextShiftBooking && new Date(nextShiftBooking.slot.startsAt).getTime() <= (now ?? 0),
+    now !== null &&
+      nextShiftStartsAt !== null &&
+      nextShiftEndsAt !== null &&
+      now >= nextShiftStartsAt &&
+      now < nextShiftEndsAt,
   );
   const todayOrders = deliveredOrders.filter((order) => order.deliveredAt && isToday(order.deliveredAt));
   const todayCollected = todayOrders.reduce(
@@ -545,7 +580,7 @@ function CourierHome() {
     try {
       await setShift(!active);
     } catch (error) {
-      setShiftError(error instanceof Error ? error.message : 'تعذر تغيير الشيفت. حاول مرة أخرى.');
+      setShiftError(courierShiftErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -584,6 +619,17 @@ function CourierHome() {
           </Body>
           {shiftIsLate ? (
             <Notice tone="danger">أنت متأخر عن موعد الشيفت؛ ابدأه الآن.</Notice>
+          ) : null}
+          {!active &&
+          now !== null &&
+          shiftStartWindowOpensAt !== null &&
+          nextShiftEndsAt !== null &&
+          !canStartShift ? (
+            <Notice tone={now >= nextShiftEndsAt ? 'warning' : 'info'}>
+              {now >= nextShiftEndsAt
+                ? 'انتهى موعد الشيفت المحجوز؛ تواصل مع الإدارة لمعرفة الخطوة التالية.'
+                : `يمكنك بدء الشيفت قبل موعده بـ30 دقيقة، ابتداءً من ${new Date(shiftStartWindowOpensAt).toLocaleString('ar-EG')}.`}
+            </Notice>
           ) : null}
           <ActionButton onPress={() => router.push('/(tabs)/my-shifts')} tone="outline">
             عرض حجوزات الشفتات
@@ -649,6 +695,7 @@ function CourierHome() {
           </Notice>
         ) : (
           <ActionButton
+            disabled={busy || (!active && !canStartShift)}
             loading={busy}
             onPress={toggleShift}
             tone={active ? 'outline' : 'primary'}
