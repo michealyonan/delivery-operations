@@ -204,13 +204,6 @@ function AdminHome() {
         <Metric value={String(pending)} label="بانتظار الإسناد" />
         <Metric value={String(deliveredToday)} label="تم توصيلها اليوم" />
       </View>
-      <Section title="طلب جديد من الإدارة">
-        <Body>اختر المطعم، وسجّل بيانات العميل والرسوم. يراجع المطعم الطلب ويقبله قبل إرساله تلقائيًا للمندوب.</Body>
-        <ActionButton onPress={() => router.push('/restaurant-new-order')}>
-          إنشاء طلب وإرساله للمطعم
-        </ActionButton>
-      </Section>
-
       <Section title="حالة المناديب الآن">
         <View style={styles.metrics}>
           <Metric value={String(onShift)} label="متاح لطلب جديد" />
