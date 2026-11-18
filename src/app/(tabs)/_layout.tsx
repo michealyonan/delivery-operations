@@ -93,6 +93,13 @@ export default function TabLayout() {
     { name: 'index', href: '/(tabs)', title: 'الرئيسية', icon: 'view-dashboard-outline', visible: !supportOnly },
     { name: 'orders', href: '/(tabs)/orders', title: 'الطلبات', icon: 'clipboard-list-outline', visible: !supportOnly },
     {
+      name: 'restaurant-new-order',
+      href: '/(tabs)/restaurant-new-order',
+      title: 'طلب جديد',
+      icon: 'cart-plus',
+      visible: admin,
+    },
+    {
       name: 'unaccepted-orders',
       href: '/(tabs)/unaccepted-orders',
       title: 'عدم القبول',
@@ -322,7 +329,13 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="restaurant-new-order"
-        options={{ href: null }}
+        options={{
+          title: 'طلب جديد',
+          href: admin ? undefined : null,
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="cart-plus" color={String(color)} size={size} />
+          ),
+        }}
       />
       <Tabs.Screen
         name="restaurant-menu"
