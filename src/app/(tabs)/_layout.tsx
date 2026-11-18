@@ -60,6 +60,9 @@ export default function TabLayout() {
   const pendingTransferCount = orderTransferRequests.filter(
     (request) => request.status === 'pending',
   ).length;
+  const pendingShiftSwapCount = shiftBookings.filter(
+    (booking) => booking.status === 'swap_listed',
+  ).length;
   const unreadNotificationCount = courierNotifications.filter(
     (notification) => !notification.readAt,
   ).length;
@@ -114,7 +117,14 @@ export default function TabLayout() {
       visible: admin,
       badge: pendingShiftCloseCount,
     },
-    { name: 'admin-shifts', href: '/(tabs)/admin-shifts', title: 'الشفتات', icon: 'calendar-clock-outline', visible: admin },
+    {
+      name: 'admin-shifts',
+      href: '/(tabs)/admin-shifts',
+      title: 'الشفتات',
+      icon: 'calendar-clock-outline',
+      visible: admin,
+      badge: pendingShiftSwapCount,
+    },
     {
       name: 'shift-delays',
       href: '/(tabs)/shift-delays',
@@ -247,6 +257,7 @@ export default function TabLayout() {
         options={{
           title: 'الشفتات',
           href: admin ? undefined : null,
+          tabBarBadge: admin && pendingShiftSwapCount > 0 ? pendingShiftSwapCount : undefined,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="calendar-clock-outline" color={String(color)} size={size} />
           ),
@@ -315,10 +326,6 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="restaurant-menu"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="order-details/[id]"
         options={{ href: null }}
       />
       <Tabs.Screen
@@ -408,6 +415,7 @@ export default function TabLayout() {
       ) : null}
       <Pressable
         accessibilityRole="button"
+        accessibilityLabel={menuOpen ? 'إغلاق قائمة التنقل' : 'فتح قائمة التنقل'}
         accessibilityState={{ expanded: menuOpen }}
         onPress={() => setMenuOpen((open) => !open)}
         style={[styles.menuToggle, { bottom: Math.max(insets.bottom, 8) + 10 }]}
@@ -416,12 +424,6 @@ export default function TabLayout() {
           color={colors.white}
           name={menuOpen ? 'close' : 'menu'}
           size={22}
-        />
-        <Text style={styles.menuToggleText}>{menuOpen ? 'إغلاق القائمة' : 'القائمة'}</Text>
-        <MaterialCommunityIcons
-          color={colors.white}
-          name={menuOpen ? 'chevron-down' : 'chevron-up'}
-          size={20}
         />
       </Pressable>
     </View>
@@ -443,9 +445,10 @@ const styles = StyleSheet.create({
   },
   menuPanel: {
     position: 'absolute',
-    left: 12,
     right: 12,
-    maxHeight: 420,
+    width: 320,
+    maxWidth: '90%',
+    maxHeight: '70%',
     overflow: 'hidden',
     borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
@@ -486,22 +489,14 @@ const styles = StyleSheet.create({
   },
   menuToggle: {
     position: 'absolute',
-    left: 12,
     right: 12,
     zIndex: 21,
-    minHeight: 52,
-    flexDirection: 'row-reverse',
+    width: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    borderRadius: 16,
-    paddingHorizontal: 16,
+    borderRadius: 28,
     backgroundColor: colors.primary,
     elevation: 10,
-  },
-  menuToggleText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '800',
   },
 });

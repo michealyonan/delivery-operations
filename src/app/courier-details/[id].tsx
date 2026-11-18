@@ -113,6 +113,14 @@ export default function CourierDetailsScreen() {
       setErrorMessage('يجب أن يتكون الرقم القومي المصري من 14 رقمًا.');
       return;
     }
+    if (address.trim().length < 3) {
+      setErrorMessage('اكتب عنوان المندوب كاملًا.');
+      return;
+    }
+    if (!details?.idCardUrl && !idCard) {
+      setErrorMessage('ارفع صورة بطاقة المندوب لإكمال الملف.');
+      return;
+    }
     setBusyAction('save');
     try {
       await updateCourierProfile(courierId, {
@@ -345,16 +353,20 @@ export default function CourierDetailsScreen() {
             />
             <Field label="العنوان" multiline onChangeText={setAddress} value={address} />
             <Body>صورة البطاقة الحالية</Body>
-            {idCardLoadFailed ? (
-              <Notice tone="warning">تعذر تحميل صورة البطاقة من التخزين. أعد تحميل رابط الصورة.</Notice>
+            {details.idCardUrl ? (
+              idCardLoadFailed ? (
+                <Notice tone="warning">تعذر تحميل صورة البطاقة من التخزين. أعد تحميل رابط الصورة.</Notice>
+              ) : (
+                <Image
+                  accessibilityLabel="صورة بطاقة المندوب"
+                  onError={() => setIdCardLoadFailed(true)}
+                  resizeMode="contain"
+                  source={{ uri: details.idCardUrl }}
+                  style={styles.cardImage}
+                />
+              )
             ) : (
-              <Image
-                accessibilityLabel="صورة بطاقة المندوب"
-                onError={() => setIdCardLoadFailed(true)}
-                resizeMode="contain"
-                source={{ uri: details.idCardUrl }}
-                style={styles.cardImage}
-              />
+              <Notice tone="warning">لا توجد صورة بطاقة محفوظة؛ ارفع صورة لإكمال الملف.</Notice>
             )}
             <ActionButton onPress={() => void pickImage(setIdCard, 'صورة البطاقة')} tone="outline">
               {idCard ? 'تغيير صورة البطاقة المختارة' : 'رفع صورة بطاقة جديدة'}
