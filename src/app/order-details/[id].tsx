@@ -4,14 +4,14 @@ import * as ImagePicker from 'expo-image-picker';
 import type { ImagePickerAsset } from 'expo-image-picker';
 import { Image, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../../components/ui';
-import { Alert } from '../../../lib/platform-alert';
-import { orderTransferReasonOptions } from '../../../lib/order-transfer';
-import { useApp, parsePiasters } from '../../../state/app-context';
-import { colors, spacing } from '../../../theme';
-import type { OrderTransferReason } from '../../../types';
+import { ActionButton, Body, Field, Heading, Notice, Page, Section, StatusTag, Subheading } from '../../components/ui';
+import { Alert } from '../../lib/platform-alert';
+import { orderTransferReasonOptions } from '../../lib/order-transfer';
+import { useApp, parsePiasters } from '../../state/app-context';
+import { colors, spacing } from '../../theme';
+import type { OrderTransferReason } from '../../types';
 
-const CourierMap = lazy(() => import('../../../components/courier-map'));
+const CourierMap = lazy(() => import('../../components/courier-map'));
 const googleMapsKeyConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY);
 
 function money(piasters: number | undefined) {

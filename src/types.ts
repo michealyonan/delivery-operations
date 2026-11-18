@@ -335,7 +335,7 @@ export interface CourierPrivateDetails {
   phone: string;
   nationalId: string;
   address: string;
-  idCardUrl: string;
+  idCardUrl?: string;
   selfieUrl?: string;
   isActive: boolean;
   isOnShift: boolean;

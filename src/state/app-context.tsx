@@ -113,6 +113,7 @@ interface AppContextValue {
   }[]) => Promise<number>;
   bookShift: (slotId: number) => Promise<void>;
   offerShiftSwap: (bookingId: number) => Promise<void>;
+  reviewCourierShiftSwap: (bookingId: number, approve: boolean) => Promise<void>;
   removeCourierShift: (bookingId: number) => Promise<void>;
   blockCourierShiftDay: (courierId: number, shiftDate: string, reason: string) => Promise<void>;
   unblockCourierShiftDay: (courierId: number, shiftDate: string) => Promise<void>;
@@ -267,7 +268,7 @@ function isCourierPrivateDetails(value: unknown): value is CourierPrivateDetails
     typeof details.phone === 'string' &&
     typeof details.nationalId === 'string' &&
     typeof details.address === 'string' &&
-    typeof details.idCardUrl === 'string' &&
+    (details.idCardUrl === undefined || typeof details.idCardUrl === 'string') &&
     (details.selfieUrl === undefined || typeof details.selfieUrl === 'string') &&
     typeof details.isActive === 'boolean' &&
     typeof details.isOnShift === 'boolean' &&
@@ -1236,6 +1237,42 @@ export function AppProvider({ children }: PropsWithChildren) {
       await refresh();
     },
     [isDemo, profile, refresh, shiftBookings],
+  );
+
+  const reviewCourierShiftSwap = useCallback(
+    async (bookingId: number, approve: boolean) => {
+      if (!profile || profile.role !== 'admin') {
+        throw new Error('مراجعة طلبات تبديل الشيفت متاحة للإدارة فقط.');
+      }
+      if (isDemo) {
+        const booking = shiftBookings.find(
+          (item) => item.id === bookingId && item.status === 'swap_listed',
+        );
+        const slot = booking && shiftSlots.find((item) => item.id === booking.slotId);
+        if (!booking || !slot || new Date(slot.startsAt).getTime() <= Date.now()) {
+          throw new Error('طلب التبديل غير متاح للمراجعة.');
+        }
+        setShiftBookings((current) =>
+          current.map((item) =>
+            item.id === bookingId
+              ? {
+                  ...item,
+                  status: approve ? 'admin_removed' : 'booked',
+                  swapListedAt: undefined,
+                }
+              : item,
+          ),
+        );
+        return;
+      }
+      const { error } = await assertBackend().rpc('admin_review_courier_shift_swap', {
+        p_booking_id: bookingId,
+        p_approve: approve,
+      });
+      if (error) throw error;
+      await refresh();
+    },
+    [isDemo, profile, refresh, shiftBookings, shiftSlots],
   );
 
   const removeCourierShift = useCallback(
@@ -3986,6 +4023,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       publishShiftSlots,
       bookShift,
       offerShiftSwap,
+      reviewCourierShiftSwap,
       removeCourierShift,
       blockCourierShiftDay,
       unblockCourierShiftDay,
@@ -4066,6 +4104,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       publishShiftSlots,
       bookShift,
       offerShiftSwap,
+      reviewCourierShiftSwap,
       removeCourierShift,
       blockCourierShiftDay,
       unblockCourierShiftDay,

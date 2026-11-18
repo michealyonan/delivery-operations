@@ -169,12 +169,15 @@ Deno.serve(async (request) => {
         .eq('id', courier.user_id)
         .maybeSingle(),
     ]);
-    if (targetAuthError || !targetAuth.user || detailsError || !details || targetProfileError) {
+    if (targetAuthError || !targetAuth.user || detailsError || targetProfileError || !targetProfile) {
       console.error(
         'تعذر تحميل البيانات الحالية لتعديل المندوب:',
         targetAuthError?.code ?? detailsError?.code ?? targetProfileError?.code,
       );
       return respond({ error: 'تعذر تحميل ملف المندوب. حاول مرة أخرى.' }, 500);
+    }
+    if (!details && typeof idCardPath !== 'string') {
+      return respond({ error: 'ارفع صورة بطاقة المندوب لإكمال الملف.' }, 400);
     }
 
     const oldEmail = targetAuth.user.email;
@@ -217,7 +220,11 @@ Deno.serve(async (request) => {
     }
 
     const cleanup: Promise<{ error: { message: string } | null }>[] = [];
-    if (typeof idCardPath === 'string' && details.id_card_path !== idCardPath) {
+    if (
+      typeof idCardPath === 'string' &&
+      details?.id_card_path &&
+      details.id_card_path !== idCardPath
+    ) {
       cleanup.push(
         serviceClient.storage.from('courier-id-cards').remove([details.id_card_path]),
       );
@@ -331,17 +338,21 @@ Deno.serve(async (request) => {
         .eq('role', 'courier')
         .maybeSingle(),
     ]);
-  if (detailsError || courierProfileError || !details || !profile) {
+  if (detailsError || courierProfileError || !profile) {
     console.error('تعذر تحميل بيانات هوية المندوب:', detailsError?.code ?? courierProfileError?.code);
     return respond({ error: 'بيانات الهوية أو صور المندوب غير مكتملة.' }, 404);
   }
 
-  const { data: card, error: cardError } = await serviceClient.storage
-    .from('courier-id-cards')
-    .createSignedUrl(details.id_card_path, 3600);
-  if (cardError) {
-    console.error('تعذر إنشاء رابط صورة بطاقة المندوب:', cardError.message);
-    return respond({ error: 'تعذر فتح صور الهوية الخاصة. حاول تحديث البيانات.' }, 500);
+  let idCardUrl: string | undefined;
+  if (details?.id_card_path) {
+    const { data: card, error: cardError } = await serviceClient.storage
+      .from('courier-id-cards')
+      .createSignedUrl(details.id_card_path, 3600);
+    if (cardError) {
+      console.error('تعذر إنشاء رابط صورة بطاقة المندوب:', cardError.message);
+      return respond({ error: 'تعذر فتح صور الهوية الخاصة. حاول تحديث البيانات.' }, 500);
+    }
+    idCardUrl = card.signedUrl;
   }
 
   let selfieUrl: string | undefined;
@@ -380,9 +391,9 @@ Deno.serve(async (request) => {
     fullName: courierData.full_name,
     email: courierData.email,
     phone: courierData.phone,
-    nationalId: details.national_id,
-    address: details.address,
-    idCardUrl: card.signedUrl,
+    nationalId: details?.national_id ?? '',
+    address: details?.address ?? '',
+    ...(idCardUrl ? { idCardUrl } : {}),
     ...(selfieUrl ? { selfieUrl } : {}),
     isActive: courierData.is_active,
     isOnShift: Boolean(presence?.is_on_shift),

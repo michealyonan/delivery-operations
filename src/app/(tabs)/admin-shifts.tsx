@@ -57,6 +57,7 @@ export default function AdminShiftsScreen() {
     shiftDayBlocks,
     publishShiftSlots,
     removeCourierShift,
+    reviewCourierShiftSwap,
     blockCourierShiftDay,
     unblockCourierShiftDay,
     notifyUnbookedCouriers,
@@ -292,6 +293,13 @@ export default function AdminShiftsScreen() {
 
   const removeShift = (bookingId: number) =>
     void run(() => removeCourierShift(bookingId), 'تم رفع الشيفت من جدول المندوب.');
+  const reviewSwap = (bookingId: number, approve: boolean) =>
+    void run(
+      () => reviewCourierShiftSwap(bookingId, approve),
+      approve
+        ? 'تمت الموافقة على التبديل وإتاحة الشيفت للحجز.'
+        : 'تم رفض التبديل والإبقاء على حجز المندوب.',
+    );
   const blockDay = () => {
     if (selectedCourierId == null) {
       setErrorMessage('اختر المندوب الذي تريد إيقافه في هذا اليوم.');
@@ -387,16 +395,34 @@ export default function AdminShiftsScreen() {
                     <Text style={styles.detail}>{formatDay(slot.shiftDate)}</Text>
                     <Text style={styles.detail}>{formatTime(slot.startsAt)}–{formatTime(slot.endsAt)}</Text>
                     {booking.status === 'swap_listed' ? (
-                      <Notice tone="warning">عرض الشيفت للتبديل</Notice>
+                      <>
+                        <Notice tone="warning">طلب تبديل الحجز بانتظار قرار الإدارة</Notice>
+                        <ActionButton
+                          disabled={busy || new Date(slot.startsAt).getTime() <= currentTime}
+                          onPress={() => reviewSwap(booking.id, true)}
+                          tone="secondary"
+                        >
+                          الموافقة وإتاحة الشيفت للحجز
+                        </ActionButton>
+                        <ActionButton
+                          disabled={busy || new Date(slot.startsAt).getTime() <= currentTime}
+                          onPress={() => reviewSwap(booking.id, false)}
+                          tone="outline"
+                        >
+                          رفض الطلب والإبقاء على الحجز
+                        </ActionButton>
+                      </>
                     ) : null}
                     {isLate ? <Notice tone="danger">متأخر عن بداية الشيفت</Notice> : null}
-                    <ActionButton
-                      disabled={busy || booking.status === 'completed'}
-                      onPress={() => removeShift(booking.id)}
-                      tone="danger"
-                    >
-                      رفع الشيفت من المندوب
-                    </ActionButton>
+                    {booking.status !== 'swap_listed' ? (
+                      <ActionButton
+                        disabled={busy || booking.status === 'completed'}
+                        onPress={() => removeShift(booking.id)}
+                        tone="danger"
+                      >
+                        رفع الشيفت من المندوب
+                      </ActionButton>
+                    ) : null}
                   </View>
                 );
               })
