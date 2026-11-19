@@ -17,7 +17,8 @@ export type CourierShiftBookingStatus =
   | 'swap_listed'
   | 'completed'
   | 'admin_removed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'absent';
 export type OrderTransferReason =
   | 'vehicle_issue'
   | 'health_issue'

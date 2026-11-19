@@ -72,6 +72,7 @@ export default function TabLayout() {
     return Boolean(
       slot &&
         new Date(slot.startsAt).getTime() <= (now ?? 0) &&
+        new Date(slot.endsAt).getTime() > (now ?? 0) &&
         !shiftRecords.some(
           (record) => record.bookingId === booking.id && record.startedAt,
         ),

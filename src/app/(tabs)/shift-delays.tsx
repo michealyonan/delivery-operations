@@ -49,12 +49,29 @@ export default function ShiftDelaysScreen() {
           (item): item is typeof item & { slot: NonNullable<typeof item.slot> } =>
             item.slot != null &&
             new Date(item.slot.startsAt).getTime() <= currentTime &&
+            new Date(item.slot.endsAt).getTime() > currentTime &&
             !shiftRecords.some(
               (record) => record.bookingId === item.booking.id && record.startedAt,
             ),
         )
         .sort((a, b) => a.slot.startsAt.localeCompare(b.slot.startsAt)),
     [couriers, currentTime, shiftBookings, shiftRecords, shiftSlots],
+  );
+  const absentBookings = useMemo(
+    () =>
+      shiftBookings
+        .filter((booking) => booking.status === 'absent')
+        .map((booking) => ({
+          booking,
+          slot: shiftSlots.find((item) => item.id === booking.slotId),
+          courier: couriers.find((item) => item.id === booking.courierId),
+        }))
+        .filter(
+          (item): item is typeof item & { slot: NonNullable<typeof item.slot> } =>
+            item.slot != null,
+        )
+        .sort((a, b) => b.slot.startsAt.localeCompare(a.slot.startsAt)),
+    [couriers, shiftBookings, shiftSlots],
   );
 
   const reload = async () => {
@@ -81,12 +98,12 @@ export default function ShiftDelaysScreen() {
   return (
     <Page>
       <Heading>تأخيرات الشيفت</Heading>
-      <Body>يظهر هنا كل مندوب حجز شيفتًا ولم يبدأه بعد موعد بدايته. يتحدث التأخير تلقائيًا كل نصف دقيقة.</Body>
+      <Body>يظهر التأخير من بداية الشيفت، ويُسجل الغياب تلقائيًا عند انتهاء موعده دون أن يبدأه المندوب.</Body>
       <ActionButton disabled={refreshing} loading={refreshing} onPress={() => void reload()} tone="outline">
         تحديث القائمة
       </ActionButton>
       {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
-      <Section title={`المتأخرون · ${lateBookings.length}`}>
+      <Section title={`المتأخرون الآن · ${lateBookings.length}`}>
         {lateBookings.length === 0 ? (
           <Notice>لا يوجد مندوبون متأخرون عن شيفتاتهم حاليًا.</Notice>
         ) : (
@@ -95,7 +112,6 @@ export default function ShiftDelaysScreen() {
               0,
               Math.floor((currentTime - new Date(slot.startsAt).getTime()) / 60_000),
             );
-            const shiftEnded = currentTime >= new Date(slot.endsAt).getTime();
             return (
               <View key={booking.id} style={styles.row}>
                 <Text style={styles.name}>{courier?.fullName ?? 'مندوب'} · {courier?.code ?? ''}</Text>
@@ -103,14 +119,26 @@ export default function ShiftDelaysScreen() {
                 <Text style={styles.detail}>
                   موعد الشيفت: {formatTime(slot.startsAt)}–{formatTime(slot.endsAt)}
                 </Text>
-                <Notice tone="danger">
-                  {shiftEnded
-                    ? `لم يبدأ الشيفت وانتهى موعده؛ تأخير ${lateMinutes} دقيقة.`
-                    : `متأخر ${lateMinutes} دقيقة عن بداية الشيفت.`}
-                </Notice>
+                <Notice tone="danger">{`متأخر ${lateMinutes} دقيقة عن بداية الشيفت.`}</Notice>
               </View>
             );
           })
+        )}
+      </Section>
+      <Section title={`الغياب المسجل · ${absentBookings.length}`}>
+        {absentBookings.length === 0 ? (
+          <Notice>لا يوجد غياب مسجل حتى الآن.</Notice>
+        ) : (
+          absentBookings.map(({ booking, slot, courier }) => (
+            <View key={booking.id} style={styles.row}>
+              <Text style={styles.name}>{courier?.fullName ?? 'مندوب'} · {courier?.code ?? ''}</Text>
+              <Text style={styles.detail}>{formatDay(slot.shiftDate)}</Text>
+              <Text style={styles.detail}>
+                موعد الشيفت: {formatTime(slot.startsAt)}–{formatTime(slot.endsAt)}
+              </Text>
+              <Notice tone="danger">غياب مسجل لعدم بدء الشيفت حتى انتهاء موعده.</Notice>
+            </View>
+          ))
         )}
       </Section>
     </Page>

@@ -69,6 +69,17 @@ export default function MyShiftsScreen() {
 
   const courierId = profile?.courierId;
   const mine = shiftBookings.filter((booking) => booking.courierId === courierId);
+  const myAbsences = mine
+    .filter((booking) => booking.status === 'absent')
+    .map((booking) => ({
+      booking,
+      slot: shiftSlots.find((item) => item.id === booking.slotId),
+    }))
+    .filter(
+      (item): item is typeof item & { slot: NonNullable<typeof item.slot> } =>
+        item.slot != null,
+    )
+    .sort((a, b) => b.slot.startsAt.localeCompare(a.slot.startsAt));
   const myActiveBookings = mine
     .filter((booking) => activeStatuses.includes(booking.status as (typeof activeStatuses)[number]))
     .sort((a, b) => {
@@ -167,7 +178,10 @@ export default function MyShiftsScreen() {
             const slot = shiftSlots.find((item) => item.id === booking.slotId);
             if (!slot) return null;
             const started = startedForBooking(booking, shiftRecords);
-            const isLate = !started && new Date(slot.startsAt).getTime() <= currentTime;
+            const isLate =
+              !started &&
+              new Date(slot.startsAt).getTime() <= currentTime &&
+              new Date(slot.endsAt).getTime() > currentTime;
             return (
               <View key={booking.id} style={styles.row}>
                 <Text style={styles.title}>{formatDay(slot.shiftDate)}</Text>
@@ -199,6 +213,22 @@ export default function MyShiftsScreen() {
               </View>
             );
           })
+        )}
+      </Section>
+
+      <Section title={`الغياب المسجل · ${myAbsences.length}`}>
+        {myAbsences.length === 0 ? (
+          <Notice>لا يوجد غياب مسجل على حجوزاتك.</Notice>
+        ) : (
+          myAbsences.map(({ booking, slot }) => (
+            <View key={booking.id} style={styles.row}>
+              <Text style={styles.title}>{formatDay(slot.shiftDate)}</Text>
+              <Text style={styles.detail}>
+                من {formatTime(slot.startsAt)} إلى {formatTime(slot.endsAt)}
+              </Text>
+              <Notice tone="danger">تم تسجيل غياب لعدم بدء الشيفت حتى انتهاء موعده.</Notice>
+            </View>
+          ))
         )}
       </Section>
 
